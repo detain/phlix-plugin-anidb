@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Phlix\PluginExample;
 
-use Phlix\Plugins\Contract\LifecycleInterface;
+use Phlix\Shared\Plugin\LifecycleInterface;
 use Psr\Container\ContainerInterface;
 
 /**
@@ -13,7 +13,7 @@ use Psr\Container\ContainerInterface;
  * Demonstrates the smallest functional plugin that satisfies the Phlix
  * plugin contract introduced in Step A.4 of `PHLIX_EXPANSION_PLAN.md`.
  * The plugin implements {@see LifecycleInterface} so the
- * `Phlix\Plugins\PluginLoader` can instantiate, enable, and disable it,
+ * `Phlix\Shared\Plugin\Loader` can instantiate, enable, and disable it,
  * and exposes a {@see self::lookup()} method that returns a fixed
  * greeting for a well-known fixture path. The greeting itself is
  * configurable through the plugin's `greeting` setting in `plugin.json`.
@@ -34,11 +34,7 @@ use Psr\Container\ContainerInterface;
  *
  * ## Provenance
  *
- * The `LifecycleInterface` lives in `Phlix\Plugins\Contract` today;
- * Step B.1 of the expansion plan moves it to
- * `Phlix\Shared\Plugin\LifecycleInterface`. When that ships this class
- * will be republished against the new namespace; until then, plugin
- * authors targeting master pin to the current FQCN.
+ * The `LifecycleInterface` lives in `Phlix\Shared\Plugin\LifecycleInterface`.
  *
  * @link https://github.com/detain/phlix/blob/master/docs/plugins/developer-guide.md Phlix plugin developer guide
  * @package Phlix\PluginExample

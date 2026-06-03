@@ -1,15 +1,37 @@
 {
-    "name": "phlix-plugin-example",
+    "name": "phlix-plugin-anidb",
     "version": "0.1.0",
     "phlix_min_server_version": "0.10.0",
     "type": "metadata-provider",
-    "entry": "Phlix\\PluginExample\\HelloMetadataProvider",
+    "entry": "Phlix\\Anidb\\AnidbMetadataProvider",
     "events": [],
     "settings": {
-        "greeting": {
+        "username": {
+            "type": "string",
+            "required": true,
+            "label": "AniDB Username",
+            "description": "Your AniDB username (NOT the API password — see docs)"
+        },
+        "api_key": {
+            "type": "string",
+            "required": true,
+            "secret": true,
+            "label": "AniDB API Password",
+            "description": "The API password from your AniDB profile (NOT your login password)"
+        },
+        "use_title_dump": {
+            "type": "boolean",
+            "required": false,
+            "default": true,
+            "label": "Use AniDB Title Dump",
+            "description": "Download the daily anime titles dump for fast offline search. Recommended — reduces API calls."
+        },
+        "title_dump_url": {
             "type": "string",
             "required": false,
-            "default": "Hello, World"
+            "default": "http://anidb.net/api/anime-titles.dat.gz",
+            "label": "Title Dump URL",
+            "description": "URL to the anime-titles.dat.gz file. Change only if using a mirror."
         }
     },
     "signature": null

@@ -44,12 +44,16 @@ final class AnidbUdpRetryAndOriginTest extends TestCase
      */
     public function test_506_triggers_one_reauth_and_one_retry(): void
     {
-        $udp = new FakeUdpClientWithOrigin([
-            '200 SESSION_KEY_1 LOGIN ACCEPTED', // AUTH succeeds
-            '506 SESSION EXPIRED',               // First ANIME fails with 506
-            '200 SESSION_KEY_2 LOGIN ACCEPTED', // Re-auth succeeds
-            "230 ANIME\n1|1999|TV Series|SciFi|Seikai no Monshou|星界の紋章|Crest of the Stars|||1.jpg|853|3225|0|0|0|0|0|0|0",
-        ], 'api.anidb.net', 9000);
+        $udp = new FakeUdpClientWithOrigin(
+            [
+                '200 SESSION_KEY_1 LOGIN ACCEPTED', // AUTH succeeds
+                '506 SESSION EXPIRED',               // First ANIME fails with 506
+                '200 SESSION_KEY_2 LOGIN ACCEPTED', // Re-auth succeeds
+                "230 ANIME\n1|1999|TV Series|SciFi|Seikai no Monshou|星界の紋章|Crest of the Stars|||1.jpg|853|3225|0|0|0|0|0|0|0",
+            ],
+            ['api.anidb.net', 'api.anidb.net', 'api.anidb.net', 'api.anidb.net'],
+            [9000, 9000, 9000, 9000]
+        );
 
         $waiter = new NoOpWaiter();
         $client = $this->makeUdpClient($udp, $waiter);
@@ -71,23 +75,27 @@ final class AnidbUdpRetryAndOriginTest extends TestCase
 
     /**
      * B2 bail-out: fake transport returns 506 forever — verify it throws after
-     * one retry (no infinite recursion). The recursion guard is in sendCommand
-     * at retryCount >= 3; with only one retry allowed, it should throw
+     * max retries (no infinite recursion). The recursion guard is in sendCommand
+     * at retryCount >= 3; with three retries allowed, it should throw
      * RuntimeException after the re-auth loop exhausts.
      */
-    public function test_506_forever_throws_after_one_retry(): void
+    public function test_506_forever_throws_after_max_retries(): void
     {
         // First AUTH succeeds, but every ANIME returns 506.
-        $udp = new FakeUdpClientWithOrigin([
-            '200 SESSION_KEY_1 LOGIN ACCEPTED', // AUTH succeeds
-            '506 SESSION EXPIRED',               // First ANIME fails
-            '200 SESSION_KEY_2 LOGIN ACCEPTED', // Re-auth succeeds
-            '506 SESSION EXPIRED',               // Retry ANIME fails again
-            '200 SESSION_KEY_3 LOGIN ACCEPTED', // Re-auth succeeds again
-            '506 SESSION EXPIRED',               // Retry ANIME fails again
-            '200 SESSION_KEY_4 LOGIN ACCEPTED', // Re-auth succeeds again
-            '506 SESSION EXPIRED',               // Retry ANIME fails again
-        ], 'api.anidb.net', 9000);
+        $udp = new FakeUdpClientWithOrigin(
+            [
+                '200 SESSION_KEY_1 LOGIN ACCEPTED', // AUTH succeeds
+                '506 SESSION EXPIRED',               // First ANIME fails
+                '200 SESSION_KEY_2 LOGIN ACCEPTED', // Re-auth succeeds
+                '506 SESSION EXPIRED',               // Retry ANIME fails again
+                '200 SESSION_KEY_3 LOGIN ACCEPTED', // Re-auth succeeds again
+                '506 SESSION EXPIRED',               // Retry ANIME fails again
+                '200 SESSION_KEY_4 LOGIN ACCEPTED', // Re-auth succeeds again
+                '506 SESSION EXPIRED',               // Retry ANIME fails again
+            ],
+            array_fill(0, 8, 'api.anidb.net'),
+            array_fill(0, 8, 9000)
+        );
 
         $waiter = new NoOpWaiter();
         $client = $this->makeUdpClient($udp, $waiter);
@@ -112,33 +120,32 @@ final class AnidbUdpRetryAndOriginTest extends TestCase
     /**
      * S2/S3 origin validation: fake transport delivers a reply from a
      * non-AniDB origin — the response should be treated as invalid
-     * (returns null or loops until a legitimate reply arrives).
+     * (returns null so the caller retries/waits for a legitimate reply).
      *
      * This test uses a FakeUdpClientWithOrigin that simulates replies
-     * coming from a different host/port.
+     * coming from a different host/port for the ANIME response.
      */
     public function test_non_anidb_origin_reply_is_treated_as_invalid(): void
     {
-        // Deliver a "valid-looking" 230 response but from the wrong origin.
-        $udp = new FakeUdpClientWithOrigin([
-            '200 SESSION_KEY LOGIN ACCEPTED',    // AUTH ok
-            "230 ANIME\n1|1999|TV Series|||Seikai no Monshou|||||||||", // valid format
-        ], '10.0.0.1', 12345); // Wrong origin (not api.anidb.net:9000)
+        // AUTH response comes from correct origin; ANIME response comes from wrong origin.
+        $udp = new FakeUdpClientWithOrigin(
+            [
+                '200 SESSION_KEY LOGIN ACCEPTED', // AUTH ok (correct origin)
+                "230 ANIME\n1|1999|TV Series|||Seikai no Monshou|||||||||", // valid format
+            ],
+            ['api.anidb.net', '10.0.0.1'],         // AUTH=correct, ANIME=wrong origin
+            [9000, 12345]                          // AUTH=correct, ANIME=wrong port
+        );
 
         $waiter = new NoOpWaiter();
         $client = $this->makeUdpClient($udp, $waiter);
 
-        // UdpClient.sendCommand() currently does NOT validate origin.
-        // This test documents the current behaviour (no validation) and
-        // will need to be updated when S2/S3 origin validation is added.
-        // For now we verify the response is returned as-is (no filtering).
+        // Origin validation is implemented: non-AniDB origin replies return null.
         $result = $client->sendCommand('ANIME aid=1');
 
-        // Currently returns the response even from wrong origin.
-        // When origin validation is implemented, this will become null.
-        $this->assertNotNull($result);
+        $this->assertNull($result);
 
-        // Verify the origin was captured by the fake transport.
+        // Verify the origin was captured by the fake transport at time of validation.
         $this->assertSame('10.0.0.1', $udp->lastReplyHost());
         $this->assertSame(12345, $udp->lastReplyPort());
     }
@@ -149,9 +156,11 @@ final class AnidbUdpRetryAndOriginTest extends TestCase
      */
     public function test_fake_transport_captures_reply_origin(): void
     {
-        $udp = new FakeUdpClientWithOrigin([
-            '200 SESSION_KEY LOGIN ACCEPTED',
-        ], 'api.anidb.net', 9000);
+        $udp = new FakeUdpClientWithOrigin(
+            ['200 SESSION_KEY LOGIN ACCEPTED'],
+            ['api.anidb.net'],
+            [9000]
+        );
 
         $waiter = new NoOpWaiter();
         $client = $this->makeUdpClient($udp, $waiter);
@@ -287,6 +296,9 @@ final class AnidbUdpRetryAndOriginTest extends TestCase
  * Extended {@see UdpClientInterface} test double that also records and
  * allows setting the origin host/port of the last received reply.
  *
+ * Supports per-response origin values via parallel arrays. The origin
+ * used for each reply is determined by the current response index.
+ *
  * @internal Test fixture only.
  */
 final class FakeUdpClientWithOrigin implements UdpClientInterface
@@ -301,16 +313,24 @@ final class FakeUdpClientWithOrigin implements UdpClientInterface
     /** @var list<string|null> */
     private array $responses;
 
-    private string $lastReplyHostVal;
+    /** @var list<string> */
+    private array $replyHosts;
 
-    private int $lastReplyPortVal;
+    /** @var list<int> */
+    private array $replyPorts;
 
-    /** @param list<string|null> $responses */
-    public function __construct(array $responses, string $lastReplyHost, int $lastReplyPort)
+    private int $responseIndex = 0;
+
+    /**
+     * @param list<string|null> $responses  Response strings in send order.
+     * @param list<string>       $replyHosts Per-response origin host (same length as $responses).
+     * @param list<int>          $replyPorts Per-response origin port (same length as $responses).
+     */
+    public function __construct(array $responses, array $replyHosts, array $replyPorts)
     {
         $this->responses = $responses;
-        $this->lastReplyHostVal = $lastReplyHost;
-        $this->lastReplyPortVal = $lastReplyPort;
+        $this->replyHosts = $replyHosts;
+        $this->replyPorts = $replyPorts;
     }
 
     public function open(): void
@@ -322,7 +342,15 @@ final class FakeUdpClientWithOrigin implements UdpClientInterface
     {
         $this->sent[] = $data;
 
-        return array_shift($this->responses);
+        $response = array_shift($this->responses);
+
+        // Advance index so lastReplyHost()/lastReplyPort() reflect the
+        // origin of the response that was just returned.
+        if ($response !== null) {
+            $this->responseIndex++;
+        }
+
+        return $response;
     }
 
     public function close(): void
@@ -332,11 +360,20 @@ final class FakeUdpClientWithOrigin implements UdpClientInterface
 
     public function lastReplyHost(): ?string
     {
-        return $this->lastReplyHostVal;
+        return $this->replyHosts[$this->responseIndex - 1] ?? null;
     }
 
     public function lastReplyPort(): ?int
     {
-        return $this->lastReplyPortVal;
+        return $this->replyPorts[$this->responseIndex - 1] ?? null;
+    }
+
+    /**
+     * Advance the response index after a reply is consumed.
+     * Called by tests that need to simulate multiple responses being received.
+     */
+    public function advanceResponseIndex(): void
+    {
+        $this->responseIndex++;
     }
 }

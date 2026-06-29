@@ -150,6 +150,103 @@ final class AnidbMetadataProvider implements LifecycleInterface
         if ($this->settings['use_title_dump']) {
             $this->ensureCacheDir();
         }
+
+        // Self-register with the host MetadataManager so the server's metadata
+        // pipeline can actually consume AniDB results. We wrap ourselves in a
+        // thin adapter that satisfies the host's
+        // Phlix\Media\Metadata\MetadataProviderInterface (search/getDetails/
+        // getImages/getProviders/getSourceName) — the same self-registration
+        // pattern the built-in Oidc/Ldap plugins use against AuthProviderRegistry.
+        $this->registerWithMetadataManager($container);
+    }
+
+    /**
+     * Resolve the host MetadataManager from the container and register an
+     * adapter of this provider against it for the anime/series media types.
+     *
+     * The registration is best-effort: if the host does not expose a
+     * MetadataManager (e.g. a stripped CLI bootstrap) we log nothing and move
+     * on — onEnable() must not abort the whole plugin just because the registry
+     * is unavailable.
+     *
+     * @param ContainerInterface $container Host PSR-11 container.
+     *
+     * @return void
+     */
+    private function registerWithMetadataManager(ContainerInterface $container): void
+    {
+        $managerClass = 'Phlix\\Media\\Metadata\\MetadataManager';
+
+        // The host registry only exists in the full server runtime. Probe the
+        // container alone (not class_exists) so plugin-only test/CLI contexts —
+        // where the server class may be absent but a compatible registry object
+        // is provided — still register, and contexts with no registry at all
+        // degrade gracefully to a no-op.
+        if (!$container->has($managerClass)) {
+            return;
+        }
+
+        $manager = $container->get($managerClass);
+        if (!is_object($manager) || !method_exists($manager, 'registerProvider')) {
+            return;
+        }
+
+        $adapter = new AnidbMetadataProviderAdapter($this);
+
+        // type list mirrors how series/anime items flow through MetadataManager's
+        // providersByType map; AniDB is anime-first but also a 'series' source.
+        $manager->registerProvider(
+            AnidbMetadataProviderAdapter::SOURCE_NAME,
+            $adapter,
+            ['anime', 'series'],
+        );
+    }
+
+    /**
+     * Public bridge: resolve a free-text anime title to an AniDB AID.
+     *
+     * Thin, host-facing wrapper over the internal title-dump / ANIME-by-name
+     * resolution used by {@see lookup()}. Consumed by
+     * {@see AnidbMetadataProviderAdapter::search()}.
+     *
+     * @param string $title Anime title to resolve.
+     *
+     * @return int|null AniDB AID, or null when no match is found.
+     */
+    public function resolveAidByTitle(string $title): ?int
+    {
+        $trimmed = trim($title);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        return $this->findAidByTitle($trimmed);
+    }
+
+    /**
+     * Public bridge: fetch full, host-shaped metadata for an AniDB AID.
+     *
+     * Thin, host-facing wrapper over {@see fetchAnimeDetails()} +
+     * {@see mapToMetadataReturn()}. Consumed by
+     * {@see AnidbMetadataProviderAdapter::getDetails()} /
+     * {@see AnidbMetadataProviderAdapter::getImages()}.
+     *
+     * @param int $aid AniDB anime ID.
+     *
+     * @return array<string, mixed> Mapped metadata array, or `[]` when not found.
+     */
+    public function fetchAnimeMetadata(int $aid): array
+    {
+        if ($aid <= 0) {
+            return [];
+        }
+
+        $anime = $this->fetchAnimeDetails($aid);
+        if ($anime === null) {
+            return [];
+        }
+
+        return $this->mapToMetadataReturn($anime);
     }
 
     /**
@@ -169,8 +266,9 @@ final class AnidbMetadataProvider implements LifecycleInterface
     /**
      * Return the PSR-14 listener subscriptions this plugin wants.
      *
-     * This plugin is invoked directly by MetadataManager via lookup()
-     * rather than through the PSR-14 event dispatcher, so no subscriptions.
+     * This plugin is consumed through the host MetadataManager — it registers
+     * an {@see AnidbMetadataProviderAdapter} in {@see onEnable()} rather than
+     * subscribing to PSR-14 events, so this is empty.
      *
      * @return array<class-string, string|callable> Empty for this plugin.
      */

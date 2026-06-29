@@ -286,7 +286,7 @@ final class UdpClient
      *
      * @param string $data Command string to send.
      *
-     * @return string|null Response string or null on timeout.
+     * @return string|null Response string or null on timeout or invalid origin.
      *
      * @throws \RuntimeException If the UDP socket is not open.
      */
@@ -294,7 +294,20 @@ final class UdpClient
     {
         $this->lastSendTimestamp = microtime(true);
 
-        return $this->transport->send($data);
+        $response = $this->transport->send($data);
+
+        // S2/S3 origin validation: reject replies not from api.anidb.net:9000
+        // This prevents forged responses from being accepted.
+        if ($response !== null) {
+            $replyHost = $this->transport->lastReplyHost();
+            $replyPort = $this->transport->lastReplyPort();
+
+            if ($replyHost !== self::API_HOST || $replyPort !== self::API_PORT) {
+                return null; // Spoofed or misrouted reply — signal caller to retry
+            }
+        }
+
+        return $response;
     }
 
     /**

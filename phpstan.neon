@@ -9,18 +9,6 @@ parameters:
         - src/AnidbMetadataProviderAdapter.php
     ignoreErrors:
         -
-            message: '#^Binary operation "\." between ''https\://api\.anidb…'' and mixed results in an error\.$#'
-            identifier: binaryOp.invalid
-            count: 1
-            path: src/AnidbMetadataProvider.php
-
-        -
-            message: '#^Constant Phlix\\Anidb\\AnidbMetadataProvider\:\:SESSION_TIMEOUT_SEC is unused\.$#'
-            identifier: classConstant.unused
-            count: 1
-            path: src/AnidbMetadataProvider.php
-
-        -
             message: '#^Method Phlix\\Anidb\\AnidbMetadataProvider\:\:mapAnimeStatus\(\) never returns null so it can be removed from the return type\.$#'
             identifier: return.unusedType
             count: 1

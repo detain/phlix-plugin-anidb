@@ -27,3 +27,17 @@ jobs:
 
       - name: Run PHPUnit
         run: vendor/bin/phpunit --colors=always
+
+  phpstan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+      - name: Run PHPStan
+        run: vendor/bin/phpstan analyse --no-progress

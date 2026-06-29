@@ -65,16 +65,6 @@ final class AnidbMetadataProvider implements LifecycleInterface
     private const API_PORT = 9000;
 
     /**
-     * Minimum interval between UDP commands in seconds (flood protection).
-     */
-    private const FLOOD_PROTECTION_INTERVAL_SEC = 4.0;
-
-    /**
-     * Ping interval in seconds (30 minutes).
-     */
-    private const PING_INTERVAL_SEC = 30 * 60;
-
-    /**
      * Plugin settings from plugin.json.
      *
      * @var array{username: string, api_key: string, use_title_dump: bool, title_dump_url: string}
@@ -85,21 +75,6 @@ final class AnidbMetadataProvider implements LifecycleInterface
      * Host PSR-11 container for resolving services.
      */
     private ?ContainerInterface $container = null;
-
-    /**
-     * Active AniDB session key (null if not authenticated).
-     */
-    private ?string $sessionKey = null;
-
-    /**
-     * Timestamp of last API command (for flood protection).
-     */
-    private float $lastSendTimestamp = 0.0;
-
-    /**
-     * Timestamp of last session activity.
-     */
-    private ?int $lastActivityTime = null;
 
     /**
      * UDP transport seam — owns the raw socket lifecycle.
@@ -622,7 +597,10 @@ final class AnidbMetadataProvider implements LifecycleInterface
 
         $posterUrl = null;
         if (!empty($anime['picname'])) {
-            $posterUrl = 'https://api.anidb.net/images/' . $anime['picname'];
+            $whitelisted = $this->validateImageFilename($anime['picname']);
+            if ($whitelisted !== null) {
+                $posterUrl = 'https://api.anidb.net/images/' . $whitelisted;
+            }
         }
 
         return [
@@ -691,5 +669,40 @@ final class AnidbMetadataProvider implements LifecycleInterface
             'music' => 'music',
             default => mb_strtolower($type),
         };
+    }
+
+    /**
+     * Validate and whitelist a picname value for safe use in image URLs.
+     *
+     * Rejects path traversal sequences, absolute URLs, and protocol-relative
+     * URLs. Only allows simple filenames ending in common image extensions.
+     *
+     * @param mixed $picname Raw picname from AniDB response.
+     *
+     * @return string|null The whitelisted filename, or null if invalid.
+     */
+    private function validateImageFilename(mixed $picname): ?string
+    {
+        // Guard: must be a non-empty string.
+        if (!is_string($picname) || $picname === '') {
+            return null;
+        }
+
+        // Reject path traversal attempts.
+        if (str_contains($picname, '..') || str_starts_with($picname, '/')) {
+            return null;
+        }
+
+        // Reject absolute or protocol-relative URLs.
+        if (str_contains($picname, '://') || str_starts_with($picname, '//')) {
+            return null;
+        }
+
+        // Only allow safe filename characters and common image extensions.
+        if (!preg_match('/^[a-zA-Z0-9_\-]+\.(jpg|jpeg|png|gif|webp)$/', $picname)) {
+            return null;
+        }
+
+        return $picname;
     }
 }

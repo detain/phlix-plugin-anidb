@@ -506,25 +506,6 @@ final class AnidbMetadataProvider implements LifecycleInterface
     // Private: UDP Command Execution
     // -------------------------------------------------------------------------
 
-    /**
-     * Send a command to AniDB with flood protection and session key.
-     *
-     * AUTH is performed lazily on first command when sessionKey is null,
-     * keeping onEnable() non-blocking. The first command after a session
-     * expiry (506) will also trigger re-auth.
-     *
-     * @param string $command Full command string (without session key).
-     *
-     * @return string|null Raw response string or null on timeout/error.
-     */
-    /**
-     * Send a command to AniDB with automatic session management.
-     *
-     * @param string $command   The command to send (without session key).
-     * @param int    $retryCount Tracks recursion depth for 506 re-auth retries (max 3).
-     *
-     * @return string|null Response string or null on timeout.
-     */
     private function sendCommand(string $command, int $retryCount = 0): ?string
     {
         // Lazy AUTH: authenticate on first command if not yet authenticated.

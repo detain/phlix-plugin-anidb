@@ -4,72 +4,58 @@ declare(strict_types=1);
 
 namespace Phlix\Anidb\Tests\Unit;
 
-use Phlix\Anidb\AnidbMetadataProvider;
+use Phlix\Anidb\Udp\UdpClient;
 use Phlix\Anidb\Udp\UdpClientInterface;
 use Phlix\Anidb\Udp\WaiterInterface;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Drives the AUTH / command path of {@see AnidbMetadataProvider} through the
- * S1a transport seam ({@see UdpClientInterface}) using a FAKE client that
- * returns canned responses and records what was sent — no network, no real
+ * Drives the AUTH / command path of {@see UdpClient} through a FAKE transport
+ * that returns canned responses and records what was sent — no network, no real
  * socket.
  *
- * This is the payoff of the S1a refactor: AUTH success, the B1 friendly-throw
- * failure path, and the raw sendCommand() round-trip are now exercisable
- * end-to-end against an injected transport. It also gives B2 (506 re-auth retry)
- * and S2/S3 (origin validation) a ready harness.
+ * Tests the UdpClient session/command logic (AUTH, sendCommand with session
+ * key append, 506 retry, flood protection) in isolation from the god-class
+ * {@see \Phlix\Anidb\AnidbMetadataProvider}.
  */
 final class AnidbUdpSeamTest extends TestCase
 {
     /**
-     * Build a provider wired to the supplied fake transport and waiter.
-     *
-     * @param UdpClientInterface  $udp    Fake transport returning canned responses.
-     * @param WaiterInterface     $waiter Waiter for flood-protection delays.
+     * Build a UdpClient wired to the supplied fake transport and waiter.
      */
-    private function makeProvider(UdpClientInterface $udp, WaiterInterface $waiter): AnidbMetadataProvider
+    private function makeUdpClient(UdpClientInterface $udp, WaiterInterface $waiter): UdpClient
     {
-        return new AnidbMetadataProvider(
+        return new UdpClient(
             [
-                'username'       => 'testuser',
-                'api_key'        => 'testkey',
-                'use_title_dump' => false,
-                'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
+                'username' => 'testuser',
+                'api_key'  => 'testkey',
             ],
             $udp,
             $waiter,
         );
     }
 
-    public function test_authenticate_succeeds_against_fake_transport_and_sets_session_key(): void
+    public function test_authenticate_succeeds_and_sets_session_key(): void
     {
         $udp = new FakeUdpClient(['200 sEsSiOnKeY LOGIN ACCEPTED']);
         $waiter = new NoOpWaiter();
 
-        $provider = $this->makeProvider($udp, $waiter);
+        $client = $this->makeUdpClient($udp, $waiter);
+        $client->authenticate();
 
-        $auth = new \ReflectionMethod($provider, 'authenticate');
-        $auth->setAccessible(true);
-        $auth->invoke($provider);
+        $this->assertSame('sEsSiOnKeY', $client->getSessionKey());
+        $this->assertTrue($client->isAuthenticated());
 
-        // The session key parsed from "200 <key> LOGIN ACCEPTED" must be stored.
-        $sessionKeyProp = new \ReflectionProperty($provider, 'sessionKey');
-        $sessionKeyProp->setAccessible(true);
-        $this->assertSame('sEsSiOnKeY', $sessionKeyProp->getValue($provider));
-
-        // The seam was driven with the AUTH command (no session key on first send).
+        // AUTH command sent (no session key on first send).
         $this->assertCount(1, $udp->sent);
         $this->assertStringStartsWith('AUTH user=testuser&pass=testkey', $udp->sent[0]);
-        // authenticate() drives the transport directly; opening the socket is
-        // onEnable()'s job, so AUTH itself does not call open() here.
+        // authenticate() drives the transport directly; open() is separate.
         $this->assertSame(0, $udp->openCount);
     }
 
     /**
-     * B1 friendly-throw path, now reachable END-TO-END through the seam:
-     * a 5xx AUTH reply makes authenticate() throw the friendly, code-specific
-     * \RuntimeException returned by parseAuthFailure() — never a fatal \Error.
+     * B1 friendly-throw path: a 5xx AUTH reply throws the friendly,
+     * code-specific \RuntimeException returned by parseAuthFailure().
      *
      * @dataProvider authFailureProvider
      */
@@ -79,17 +65,11 @@ final class AnidbUdpSeamTest extends TestCase
     ): void {
         $udp = new FakeUdpClient([$cannedResponse]);
         $waiter = new NoOpWaiter();
-        $provider = $this->makeProvider($udp, $waiter);
-
-        $auth = new \ReflectionMethod($provider, 'authenticate');
-        $auth->setAccessible(true);
+        $client = $this->makeUdpClient($udp, $waiter);
 
         $thrown = null;
         try {
-            $auth->invoke($provider);
-        } catch (\ReflectionException $e) {
-            // Reflection wraps the real exception thrown inside the method.
-            $thrown = $e->getPrevious();
+            $client->authenticate();
         } catch (\Throwable $e) {
             $thrown = $e;
         }
@@ -99,9 +79,8 @@ final class AnidbUdpSeamTest extends TestCase
         $this->assertStringContainsString($expectedMessageFragment, $thrown->getMessage());
 
         // No session key should be set on a failed AUTH.
-        $sessionKeyProp = new \ReflectionProperty($provider, 'sessionKey');
-        $sessionKeyProp->setAccessible(true);
-        $this->assertNull($sessionKeyProp->getValue($provider));
+        $this->assertNull($client->getSessionKey());
+        $this->assertFalse($client->isAuthenticated());
     }
 
     /**
@@ -123,16 +102,11 @@ final class AnidbUdpSeamTest extends TestCase
         // A null reply (timeout) must surface the explicit "no response" message.
         $udp = new FakeUdpClient([null]);
         $waiter = new NoOpWaiter();
-        $provider = $this->makeProvider($udp, $waiter);
-
-        $auth = new \ReflectionMethod($provider, 'authenticate');
-        $auth->setAccessible(true);
+        $client = $this->makeUdpClient($udp, $waiter);
 
         $thrown = null;
         try {
-            $auth->invoke($provider);
-        } catch (\ReflectionException $e) {
-            $thrown = $e->getPrevious();
+            $client->authenticate();
         } catch (\Throwable $e) {
             $thrown = $e;
         }
@@ -141,72 +115,108 @@ final class AnidbUdpSeamTest extends TestCase
         $this->assertStringContainsString('no response', $thrown->getMessage());
     }
 
-    public function test_send_command_returns_canned_transport_response(): void
+    public function test_send_command_appends_session_key_to_command(): void
     {
         // sendCommand() with null sessionKey does lazy AUTH first, then sends
-        // the actual command. Two sends: AUTH response + PING response.
+        // the actual command.
         $udp = new FakeUdpClient([
             '200 SESSION_KEY LOGIN ACCEPTED',  // AUTH response
-            "230 ANIME\n1|data",              // PING response
+            "230 ANIME\n1|data",               // ANIME response
         ]);
         $waiter = new NoOpWaiter();
-        $provider = $this->makeProvider($udp, $waiter);
 
-        $send = new \ReflectionMethod($provider, 'sendCommand');
-        $send->setAccessible(true);
-
-        $result = $send->invoke($provider, 'PING');
+        $client = $this->makeUdpClient($udp, $waiter);
+        $result = $client->sendCommand('ANIME aid=1');
 
         $this->assertSame("230 ANIME\n1|data", $result);
-        // Two commands sent: AUTH (no session key) then PING (with session key)
+        // Two sends: AUTH (no session key) then ANIME (with session key).
         $this->assertCount(2, $udp->sent);
         $this->assertStringStartsWith('AUTH user=testuser', $udp->sent[0]);
-        $this->assertSame('PING&s=SESSION_KEY', $udp->sent[1]);
+        $this->assertStringContainsString('&s=SESSION_KEY', $udp->sent[1]);
+    }
+
+    public function test_send_command_with_already_authenticated_client(): void
+    {
+        // Pre-authenticate, then call sendCommand - no AUTH should be sent.
+        $udp = new FakeUdpClient([
+            '200 SESSION_KEY LOGIN ACCEPTED',  // AUTH response (not consumed)
+            "230 ANIME\n1|data",               // ANIME response
+        ]);
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+        $client->authenticate(); // sessionKey is now set
+
+        // Clear sent array to isolate sendCommand's sends.
+        $udp->sent = [];
+
+        $result = $client->sendCommand('ANIME aid=1');
+
+        $this->assertSame("230 ANIME\n1|data", $result);
+        // Only one send: ANIME with session key (no AUTH since already authenticated).
+        $this->assertCount(1, $udp->sent);
+        $this->assertStringContainsString('&s=SESSION_KEY', $udp->sent[0]);
+    }
+
+    public function test_logout_clears_session(): void
+    {
+        $udp = new FakeUdpClient([
+            '200 SESSION_KEY LOGIN ACCEPTED',
+            '200 LOGOUT ACCEPTED',
+        ]);
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+        $client->authenticate();
+        $this->assertTrue($client->isAuthenticated());
+
+        $client->logout();
+
+        $this->assertFalse($client->isAuthenticated());
+        $this->assertNull($client->getSessionKey());
     }
 
     /**
-     * S1b success condition: flood-interval logic is honored without real sleeping.
-     *
-     * Verifies that enforceFloodProtection() calls the waiter with the correct
-     * computed wait time based on elapsed time since last send — not wall-clock.
-     * The NoOpWaiter records all wait durations so we can assert the exact value.
+     * S1b flood protection: verify enforceFloodProtection is called and waiter
+     * receives the correct computed wait time based on elapsed time since last send.
      *
      * @dataProvider floodWaitTimeProvider
      */
-    public function test_enforce_flood_protection_computes_correct_wait_time(
+    public function test_flood_protection_calls_waiter_with_correct_time(
         float $elapsedSinceLastSend,
         ?float $expectedWaitTime,
     ): void {
-        $udp = new FakeUdpClient(["230 ANIME\n1|data", '200 SESSION KEY LOGIN ACCEPTED']);
+        $udp = new FakeUdpClient([
+            '200 SESSION_KEY LOGIN ACCEPTED', // AUTH response
+            "230 ANIME\n1|data",              // First ANIME response
+            "230 ANIME\n2|data",              // Second ANIME response
+        ]);
         $waiter = new NoOpWaiter();
-        $provider = $this->makeProvider($udp, $waiter);
 
-        // Simulate elapsed time since last send by directly setting lastSendTimestamp
-        $reflection = new \ReflectionClass($provider);
+        $client = $this->makeUdpClient($udp, $waiter);
+
+        // First command: establishes baseline and triggers first wait.
+        $client->sendCommand('ANIME aid=1');
+
+        // Simulate elapsed time since last send by directly setting lastSendTimestamp.
+        $reflection = new \ReflectionClass($client);
         $lastSendProp = $reflection->getProperty('lastSendTimestamp');
         $lastSendProp->setAccessible(true);
-
-        // lastSendTimestamp is "seconds ago" from now, so subtract from current time
         $now = microtime(true);
-        $lastSendProp->setValue($provider, $now - $elapsedSinceLastSend);
+        $lastSendProp->setValue($client, $now - $elapsedSinceLastSend);
 
-        // Also set session key so sendCommand doesn't try to AUTH first
-        $sessionKeyProp = $reflection->getProperty('sessionKey');
-        $sessionKeyProp->setAccessible(true);
-        $sessionKeyProp->setValue($provider, 'fake-session-key');
+        // Second command triggers enforceFloodProtection() before sending.
+        $client->sendCommand('ANIME aid=2');
 
-        // Call sendCommand — enforceFloodProtection runs before the UDP send
-        $send = $reflection->getMethod('sendCommand');
-        $send->setAccessible(true);
-        $send->invoke($provider, 'ANIME aid=1');
-
-        // Assert the computed wait time was passed to the waiter (not wall-clock)
+        // First command always triggers a wait (initial flood protection).
+        // Second command's wait depends on elapsed time.
         if ($expectedWaitTime === null) {
-            // No wait should have been called
-            $this->assertCount(0, $waiter->waits);
-        } else {
+            // Only the first command's wait should be recorded.
             $this->assertCount(1, $waiter->waits);
-            $this->assertEqualsWithDelta($expectedWaitTime, $waiter->waits[0], 0.001);
+        } else {
+            // Two waits: first command + second command's flood protection.
+            $this->assertCount(2, $waiter->waits);
+            $this->assertEqualsWithDelta($expectedWaitTime, $waiter->waits[1], 0.001);
         }
     }
 
@@ -216,13 +226,13 @@ final class AnidbUdpSeamTest extends TestCase
     public static function floodWaitTimeProvider(): array
     {
         // Format: [elapsedSinceLastSend, expectedWaitTime|null]
-        // null means no wait should be called (waitTime <= 0)
+        // null means no additional wait (waitTime <= 0)
         // FLOOD_PROTECTION_INTERVAL_SEC = 4.0
         return [
             // No wait needed if enough time has passed
-            'elapsed >= interval: no wait' => [5.0, null],
+            'elapsed >= interval: no additional wait' => [5.0, null],
             // Exactly at interval: no wait
-            'elapsed == interval: no wait' => [4.0, null],
+            'elapsed == interval: no additional wait' => [4.0, null],
             // Under interval: wait the difference
             'elapsed 2s under: wait 2s' => [2.0, 2.0],
             'elapsed 1s under: wait 3s' => [1.0, 3.0],
@@ -235,40 +245,23 @@ final class AnidbUdpSeamTest extends TestCase
 
 /**
  * In-memory {@see UdpClientInterface} that pops canned responses in order and
- * records each sent payload. Drives provider logic without a real socket.
+ * records each sent payload. Drives client logic without a real socket.
  *
  * @internal Test fixture only.
  */
 final class FakeUdpClient implements UdpClientInterface
 {
-    /**
-     * Payloads passed to {@see send()}, in order.
-     *
-     * @var list<string>
-     */
+    /** @var list<string> */
     public array $sent = [];
 
-    /**
-     * Number of times {@see open()} was called.
-     */
     public int $openCount = 0;
 
-    /**
-     * Number of times {@see close()} was called.
-     */
     public int $closeCount = 0;
 
-    /**
-     * Queue of canned responses returned by successive {@see send()} calls.
-     *
-     * @var list<string|null>
-     */
+    /** @var list<string|null> */
     private array $responses;
 
-    /**
-     * @param list<string|null> $responses Canned replies, returned FIFO. When
-     *     exhausted, {@see send()} returns null (timeout-equivalent).
-     */
+    /** @param list<string|null> $responses */
     public function __construct(array $responses = [])
     {
         $this->responses = $responses;
@@ -305,7 +298,7 @@ final class FakeUdpClient implements UdpClientInterface
 /**
  * No-op {@see WaiterInterface} implementation that records wait durations.
  *
- * Used in tests to verify that {@see AnidbMetadataProvider::enforceFloodProtection()}
+ * Used in tests to verify that {@see UdpClient::enforceFloodProtection()}
  * computes the correct wait time without actually sleeping. The recorded durations
  * can then be asserted against expected values — verifying the math, not wall-clock.
  *
@@ -313,11 +306,7 @@ final class FakeUdpClient implements UdpClientInterface
  */
 final class NoOpWaiter implements WaiterInterface
 {
-    /**
-     * Wait durations passed to {@see wait()}, in call order.
-     *
-     * @var list<float>
-     */
+    /** @var list<float> */
     public array $waits = [];
 
     public function wait(float $seconds): void

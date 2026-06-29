@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Phlix\Anidb;
 
+use Phlix\Anidb\Udp\SocketUdpClient;
+use Phlix\Anidb\Udp\UdpClientInterface;
 use Phlix\Shared\Plugin\LifecycleInterface;
 use Psr\Container\ContainerInterface;
 
@@ -98,11 +100,13 @@ final class AnidbMetadataProvider implements LifecycleInterface
     private ?int $lastActivityTime = null;
 
     /**
-     * Local UDP socket resource.
+     * UDP transport seam — owns the raw socket lifecycle.
      *
-     * @var resource|null
+     * Injected (defaulting to {@see SocketUdpClient}) so AUTH / command-parse /
+     * retry logic can be driven through a fake transport in tests without the
+     * network. See {@see UdpClientInterface}.
      */
-    private $socket = null;
+    private UdpClientInterface $udpClient;
 
     /**
      * Title dump index for fast offline search.
@@ -120,11 +124,19 @@ final class AnidbMetadataProvider implements LifecycleInterface
      * @param array{username: string, api_key: string, use_title_dump: bool, title_dump_url: string} $settings
      *     Plugin settings from plugin.json. api_key is the AniDB API password
      *     (NOT the website login password).
+     * @param UdpClientInterface|null $udpClient Transport seam. Defaults to a
+     *     {@see SocketUdpClient} bound to the AniDB endpoint, preserving the
+     *     original inline-socket behavior. Inject a fake in tests to drive
+     *     AUTH/command/retry logic without the network.
      */
-    public function __construct(array $settings)
+    public function __construct(array $settings, ?UdpClientInterface $udpClient = null)
     {
         $this->settings = $settings;
         $this->cacheDir = dirname(__DIR__) . '/var/plugins/phlix-plugin-anidb';
+        $this->udpClient = $udpClient ?? new SocketUdpClient(
+            self::API_HOST,
+            self::API_PORT,
+        );
     }
 
     /**
@@ -334,45 +346,30 @@ final class AnidbMetadataProvider implements LifecycleInterface
     // -------------------------------------------------------------------------
 
     /**
-     * Open the UDP socket with a fixed local port (>1024) to avoid multi-port ban.
+     * Open the UDP transport (fixed local port >1024 to avoid multi-port ban).
+     *
+     * Delegates to the injected {@see UdpClientInterface}; the raw socket
+     * create/bind/configure lifecycle now lives in {@see SocketUdpClient}.
      *
      * @return void
      *
-     * @throws \RuntimeException If socket creation fails.
+     * @throws \RuntimeException If socket creation/binding fails.
      */
     private function openSocket(): void
     {
-        $this->socket = @socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
-        if ($this->socket === false) {
-            throw new \RuntimeException('Failed to create UDP socket: ' . socket_strerror(socket_last_error()));
-        }
-
-        // Reuse local port to avoid triggering AniDB's multi-port ban detection
-        socket_set_option($this->socket, SOL_SOCKET, SO_REUSEADDR, 1);
-
-        // Bind to a fixed local port above 1024
-        $localPort = 9001; // Could be made configurable if needed
-        if (!@socket_bind($this->socket, '0.0.0.0', $localPort)) {
-            $err = socket_strerror(socket_last_error($this->socket));
-            $this->closeSocket();
-            throw new \RuntimeException("Failed to bind UDP socket to port {$localPort}: {$err}");
-        }
-
-        socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, ['sec' => 10, 'usec' => 0]);
-        socket_set_option($this->socket, SOL_SOCKET, SO_SNDTIMEO, ['sec' => 10, 'usec' => 0]);
+        $this->udpClient->open();
     }
 
     /**
-     * Close the UDP socket.
+     * Close the UDP transport.
+     *
+     * Delegates to the injected {@see UdpClientInterface}.
      *
      * @return void
      */
     private function closeSocket(): void
     {
-        if ($this->socket !== null) {
-            @socket_close($this->socket);
-            $this->socket = null;
-        }
+        $this->udpClient->close();
     }
 
     /**
@@ -522,44 +519,23 @@ final class AnidbMetadataProvider implements LifecycleInterface
     }
 
     /**
-     * Low-level UDP send/receive.
+     * Low-level UDP send/receive via the transport seam.
+     *
+     * The raw socket sendto/recvfrom now lives in {@see SocketUdpClient::send()},
+     * which throws `'UDP socket not open'` when the socket is closed (preserving
+     * the original behavior) and returns the trimmed reply or null on timeout.
      *
      * @param string $data Command string to send.
      *
      * @return string|null Response string or null on timeout.
+     *
+     * @throws \RuntimeException If the UDP socket is not open.
      */
     private function udpSend(string $data): ?string
     {
-        if ($this->socket === null) {
-            throw new \RuntimeException('UDP socket not open');
-        }
-
         $this->lastSendTimestamp = microtime(true);
 
-        $bytesSent = @socket_sendto(
-            $this->socket,
-            $data,
-            strlen($data),
-            0,
-            self::API_HOST,
-            self::API_PORT
-        );
-
-        if ($bytesSent === false) {
-            return null;
-        }
-
-        $recvBuf = '';
-        $recvFrom = '';
-        $port = 0;
-
-        $recvResult = @socket_recvfrom($this->socket, $recvBuf, 1400, 0, $recvFrom, $port);
-
-        if ($recvResult === false) {
-            return null;
-        }
-
-        return trim($recvBuf);
+        return $this->udpClient->send($data);
     }
 
     /**

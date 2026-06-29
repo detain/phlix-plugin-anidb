@@ -10,6 +10,7 @@ use Phlix\Anidb\TitleDump\TitleDumpIndexer;
 use Phlix\Anidb\TitleDump\TitleDumpManager;
 use Phlix\Anidb\Udp\ProductionWaiter;
 use Phlix\Anidb\Udp\SocketUdpClient;
+use Phlix\Anidb\Udp\UdpClient;
 use Phlix\Anidb\Udp\UdpClientInterface;
 use Phlix\Anidb\Udp\WaiterInterface;
 use Phlix\Shared\Plugin\LifecycleInterface;
@@ -69,11 +70,6 @@ final class AnidbMetadataProvider implements LifecycleInterface
     private const FLOOD_PROTECTION_INTERVAL_SEC = 4.0;
 
     /**
-     * Session timeout in seconds (35 minutes).
-     */
-    private const SESSION_TIMEOUT_SEC = 35 * 60;
-
-    /**
      * Ping interval in seconds (30 minutes).
      */
     private const PING_INTERVAL_SEC = 30 * 60;
@@ -125,6 +121,16 @@ final class AnidbMetadataProvider implements LifecycleInterface
     private WaiterInterface $waiter;
 
     /**
+     * High-level UDP session client — encapsulates AUTH, session key, flood
+     * protection, keep-alive pings, and 506 re-auth retry.
+     *
+     * Initialized in constructor from $settings + injected seams. The onEnable()
+     * hook calls open(); onDisable() calls close(). Tests can inject a
+     * fake UdpClient that returns canned responses.
+     */
+    private UdpClient $udpSession;
+
+    /**
      * Parser seam for AniDB 230 ANIME response parsing.
      *
      * Defaults to {@see AnimeResponseParser}; injected in tests to verify
@@ -168,6 +174,9 @@ final class AnidbMetadataProvider implements LifecycleInterface
      * @param TitleDumpManager|null $titleDumpManager Seam for title-dump search.
      *     Defaults to null (initialized lazily in onEnable when use_title_dump is true).
      *     Inject a stub in tests to verify call counts or provide a pre-built index.
+     * @param UdpClient|null $udpSession High-level UDP session (AUTH, session key,
+     *     flood protection, 506 retry). Defaults to new UdpClient($settings, $udpClient, $waiter).
+     *     Inject a test double to verify call counts without network I/O.
      */
     public function __construct(
         array $settings,
@@ -176,6 +185,7 @@ final class AnidbMetadataProvider implements LifecycleInterface
         ?AnimeResponseParser $animeParser = null,
         ?FilenameTitleExtractor $filenameExtractor = null,
         ?TitleDumpManager $titleDumpManager = null,
+        ?UdpClient $udpSession = null,
     ) {
         $this->settings = $settings;
         $this->cacheDir = dirname(__DIR__) . '/var/plugins/phlix-plugin-anidb';
@@ -187,6 +197,7 @@ final class AnidbMetadataProvider implements LifecycleInterface
         $this->animeParser = $animeParser ?? new AnimeResponseParser();
         $this->filenameExtractor = $filenameExtractor ?? new FilenameTitleExtractor();
         $this->titleDumpManager = $titleDumpManager;
+        $this->udpSession = $udpSession ?? new UdpClient($this->settings, $this->udpClient, $this->waiter);
     }
 
     /**
@@ -204,7 +215,7 @@ final class AnidbMetadataProvider implements LifecycleInterface
     {
         $this->container = $container;
 
-        $this->openSocket();
+        $this->udpSession->open();
 
         // Lazy-load title index on first lookup if enabled
         if ($this->settings['use_title_dump'] && $this->titleDumpManager === null) {
@@ -323,8 +334,7 @@ final class AnidbMetadataProvider implements LifecycleInterface
      */
     public function onDisable(): void
     {
-        $this->logout();
-        $this->closeSocket();
+        $this->udpSession->close();
         $this->container = null;
     }
 
@@ -408,150 +418,15 @@ final class AnidbMetadataProvider implements LifecycleInterface
      *
      * @throws \RuntimeException If socket creation/binding fails.
      */
-    private function openSocket(): void
-    {
-        $this->udpClient->open();
-    }
 
-    /**
-     * Close the UDP transport.
-     *
-     * Delegates to the injected {@see UdpClientInterface}.
-     *
-     * @return void
-     */
-    private function closeSocket(): void
-    {
-        $this->udpClient->close();
-    }
-
-    /**
-     * Authenticate to AniDB via AUTH command.
-     *
-     * AUTH is special: it has no session key (the server assigns one in the
-     * response), so we bypass sendCommand() which would incorrectly append
-     * '&s=' to a null sessionKey. AUTH also bypasses flood protection since
-     * it's the first packet sent; the server enforces the rate limit.
-     *
-     * @return void
-     *
-     * @throws \RuntimeException If AUTH fails.
-     */
-    private function authenticate(): void
-    {
-        $cmd = sprintf(
-            'AUTH user=%s&pass=%s&protover=3&client=phlix&clientver=1',
-            urlencode($this->settings['username']),
-            urlencode($this->settings['api_key'])
-        );
-
-        // Send AUTH directly — bypass sendCommand() which appends '&s='.
-        // The AUTH response contains the session key; subsequent commands
-        // will use sendCommand() which appends '&s=' correctly.
-        $response = $this->udpSend($cmd);
-
-        if ($response === null) {
-            throw new \RuntimeException('AniDB AUTH: no response (timeout or network failure)');
-        }
-
-        // Parse: "200 SESSION_KEY LOGIN ACCEPTED" or "201 SESSION_KEY ..."
-        if (!preg_match('/^(200|201)\s+(\S+)\s+/', $response, $matches)) {
-            throw $this->parseAuthFailure($response);
-        }
-
-        $this->sessionKey = $matches[2];
-        $this->lastActivityTime = time();
-
-        // TODO: Handle 201 (new version available) — notify operator
-    }
-
-    /**
-     * Send LOGOUT to AniDB and clear session.
-     *
-     * @return void
-     */
-    private function logout(): void
-    {
-        if ($this->sessionKey === null) {
-            return;
-        }
-
-        $this->sendCommand('LOGOUT s=' . $this->sessionKey);
-        $this->sessionKey = null;
-        $this->lastActivityTime = null;
-    }
-
-    /**
-     * Send a PING to keep the session alive.
-     *
-     * @return void
-     */
-    private function ping(): void
-    {
-        if ($this->sessionKey === null) {
-            return;
-        }
-
-        $this->sendCommand('PING s=' . $this->sessionKey);
-        $this->lastActivityTime = time();
-    }
-
-    /**
-     * Check if the session needs a keepalive ping.
-     *
-     * @return bool True if ping should be sent.
-     */
-    private function needsKeepAlive(): bool
-    {
-        if ($this->lastActivityTime === null || $this->sessionKey === null) {
-            return false;
-        }
-
-        return (time() - $this->lastActivityTime) >= self::PING_INTERVAL_SEC;
-    }
-
-    /**
-     * Parse an AUTH failure response and return an appropriate exception.
-     *
-     * @param string $response Raw response string.
-     *
-     * @return \RuntimeException
-     */
-    private function parseAuthFailure(string $response): \RuntimeException
-    {
-        if (str_starts_with($response, '500')) {
-            return new \RuntimeException('AniDB AUTH failed: Invalid username or API password');
-        }
-        if (str_starts_with($response, '503')) {
-            return new \RuntimeException('AniDB AUTH failed: Client version outdated');
-        }
-        if (str_starts_with($response, '504')) {
-            return new \RuntimeException('AniDB AUTH failed: Client banned — ' . substr($response, 4));
-        }
-        if (str_starts_with($response, '555')) {
-            return new \RuntimeException('AniDB AUTH failed: Banned — ' . substr($response, 4));
-        }
-
-        return new \RuntimeException('AniDB AUTH failed: ' . $response);
-    }
-
-    // -------------------------------------------------------------------------
-    // Private: UDP Command Execution
-    // -------------------------------------------------------------------------
-
-    /**
-     * Send a command to AniDB with flood protection and session key.
-     *
-     * AUTH is performed lazily on first command when sessionKey is null,
-     * keeping onEnable() non-blocking. The first command after a session
-     * expiry (506) will also trigger re-auth.
-     *
-     * @param string $command Full command string (without session key).
-     *
-     * @return string|null Raw response string or null on timeout/error.
-     */
     /**
      * Send a command to AniDB with automatic session management.
+     *
+     * Delegates to the injected {@see UdpClient} (high-level session client)
+     * which handles AUTH, session key, flood protection, keep-alive pings, and
+     * 506 re-auth retry internally. This thin wrapper only exists to preserve
+     * the original package-private method signature for callers that were
+     * already reaching sendCommand() directly within this class.
      *
      * @param string $command   The command to send (without session key).
      * @param int    $retryCount Tracks recursion depth for 506 re-auth retries (max 3).
@@ -560,84 +435,7 @@ final class AnidbMetadataProvider implements LifecycleInterface
      */
     private function sendCommand(string $command, int $retryCount = 0): ?string
     {
-        // Lazy AUTH: authenticate on first command if not yet authenticated.
-        if ($this->sessionKey === null) {
-            $this->authenticate();
-        }
-
-        // Attach session key
-        $fullCommand = $command . '&s=' . $this->sessionKey;
-
-        // Flood protection: enforce minimum interval between sends
-        $this->enforceFloodProtection();
-
-        // Keep session alive if needed
-        if ($this->needsKeepAlive()) {
-            $this->ping();
-        }
-
-        $result = $this->udpSend($fullCommand);
-
-        if ($result !== null) {
-            $this->lastActivityTime = time();
-        }
-
-        // Handle session-expired response: re-authenticate and retry with recursion guard.
-        if ($result !== null && str_starts_with(trim($result), '506')) {
-            if ($retryCount >= 3) {
-                throw new \RuntimeException(
-                    'AniDB session expired: re-authentication failed after 3 retries'
-                );
-            }
-            $this->authenticate();
-            // Fix: token is added to $fullCommand, not $command — strip from $fullCommand.
-            $retryCommand = str_replace('&s=' . $this->sessionKey, '', $fullCommand);
-            $result = $this->sendCommand($retryCommand, $retryCount + 1);
-        }
-
-        return $result;
-    }
-
-    /**
-     * Low-level UDP send/receive via the transport seam.
-     *
-     * The raw socket sendto/recvfrom now lives in {@see SocketUdpClient::send()},
-     * which throws `'UDP socket not open'` when the socket is closed (preserving
-     * the original behavior) and returns the trimmed reply or null on timeout.
-     *
-     * @param string $data Command string to send.
-     *
-     * @return string|null Response string or null on timeout.
-     *
-     * @throws \RuntimeException If the UDP socket is not open.
-     */
-    private function udpSend(string $data): ?string
-    {
-        $this->lastSendTimestamp = microtime(true);
-
-        return $this->udpClient->send($data);
-    }
-
-    /**
-     * Enforce the 4-second minimum between UDP commands.
-     *
-     * Uses the injected {@see WaiterInterface} instead of blocking `usleep()`,
-     * allowing non-blocking implementations (e.g. Workerman\Timer) to yield
-     * to the event loop rather than parking the resident worker.
-     *
-     * @return void
-     */
-    private function enforceFloodProtection(): void
-    {
-        $now = microtime(true);
-        $elapsed = $now - $this->lastSendTimestamp;
-
-        $waitTime = self::FLOOD_PROTECTION_INTERVAL_SEC - $elapsed;
-        if ($waitTime > 0) {
-            $this->waiter->wait($waitTime);
-        }
-
-        $this->lastSendTimestamp = microtime(true);
+        return $this->udpSession->sendCommand($command, $retryCount);
     }
 
     // -------------------------------------------------------------------------

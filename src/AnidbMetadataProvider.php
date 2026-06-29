@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Phlix\Anidb;
 
+use Phlix\Anidb\TitleDump\TitleDumpIndexer;
 use Phlix\Anidb\Udp\ProductionWaiter;
 use Phlix\Anidb\Udp\SocketUdpClient;
 use Phlix\Anidb\Udp\UdpClientInterface;
@@ -123,7 +124,9 @@ final class AnidbMetadataProvider implements LifecycleInterface
     /**
      * Title dump index for fast offline search.
      *
-     * @var array<string, array{aid: int, title: string, type: string}>|null
+     * Grouped by AID: list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}>
+     *
+     * @var list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}>|null
      */
     private ?array $titleIndex = null;
 
@@ -643,6 +646,12 @@ final class AnidbMetadataProvider implements LifecycleInterface
     /**
      * Search the title dump index for a matching anime.
      *
+     * The index is grouped by AID. Each entry contains:
+     *   ["aid" => 12345, "titles" => [["title" => "...", "type" => "main", "lang" => "en"], ...]]
+     *
+     * Search prioritizes exact matches, then prefix matches (longest first),
+     * then contains matches (longest first).
+     *
      * @param string $query Title to search for.
      *
      * @return int|null Best-matching AID or null.
@@ -660,28 +669,33 @@ final class AnidbMetadataProvider implements LifecycleInterface
         $bestScore = 0;
 
         foreach ($this->titleIndex as $entry) {
-            $titleLower = mb_strtolower($entry['title']);
+            $aid = $entry['aid'];
+            $titles = $entry['titles'];
 
-            // Exact match (after trimming): highest score
-            if ($titleLower === $queryLower) {
-                return $entry['aid'];
-            }
+            foreach ($titles as $titleEntry) {
+                $titleLower = mb_strtolower($titleEntry['title']);
 
-            // Prefix match: score by length
-            if (str_starts_with($titleLower, $queryLower)) {
-                $score = strlen($entry['title']);
-                if ($score > $bestScore) {
-                    $bestScore = $score;
-                    $bestAID = $entry['aid'];
+                // Exact match (after trimming): highest score — return immediately
+                if ($titleLower === $queryLower) {
+                    return $aid;
                 }
-            }
 
-            // Contains match: lower score
-            if (str_contains($titleLower, $queryLower)) {
-                $score = strlen($entry['title']) / 2;
-                if ($score > $bestScore) {
-                    $bestScore = $score;
-                    $bestAID = $entry['aid'];
+                // Prefix match: score by title length
+                if (str_starts_with($titleLower, $queryLower)) {
+                    $score = strlen($titleEntry['title']);
+                    if ($score > $bestScore) {
+                        $bestScore = $score;
+                        $bestAID = $aid;
+                    }
+                }
+
+                // Contains match: lower score
+                if (str_contains($titleLower, $queryLower)) {
+                    $score = strlen($titleEntry['title']) / 2;
+                    if ($score > $bestScore) {
+                        $bestScore = $score;
+                        $bestAID = $aid;
+                    }
                 }
             }
         }
@@ -691,6 +705,12 @@ final class AnidbMetadataProvider implements LifecycleInterface
 
     /**
      * Load the title dump index from cache if not yet loaded.
+     *
+     * The cached index uses the grouped format:
+     *   [
+     *     ["aid" => 12345, "titles" => [["title" => "...", "type" => "main", "lang" => "en"], ...]],
+     *     ...
+     *   ]
      *
      * @return void
      */
@@ -705,7 +725,7 @@ final class AnidbMetadataProvider implements LifecycleInterface
         if (file_exists($indexFile) && is_readable($indexFile)) {
             $data = file_get_contents($indexFile);
             if ($data !== false) {
-                /** @var array<string, array{aid: int, title: string, type: string}> $decoded */
+                /** @var list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}> $decoded */
                 $decoded = json_decode($data, true);
                 if (is_array($decoded)) {
                     $this->titleIndex = $decoded;
@@ -719,7 +739,7 @@ final class AnidbMetadataProvider implements LifecycleInterface
     }
 
     /**
-     * Ensure the cache directory exists.
+     * Ensure the cache directory exists and the title index is up to date.
      *
      * @return void
      */
@@ -728,6 +748,14 @@ final class AnidbMetadataProvider implements LifecycleInterface
         if (!is_dir($this->cacheDir)) {
             mkdir($this->cacheDir, 0755, true);
         }
+
+        // Build and persist the title index if not present or stale.
+        // This runs once on plugin enable; subsequent lookups reuse the cached index.
+        $indexer = new TitleDumpIndexer(
+            $this->cacheDir,
+            $this->settings['title_dump_url'],
+        );
+        $indexer->downloadAndIndex();
     }
 
     // -------------------------------------------------------------------------

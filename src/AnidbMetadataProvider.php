@@ -300,7 +300,7 @@ final class AnidbMetadataProvider implements LifecycleInterface
 
         // Parse: "200 SESSION_KEY LOGIN ACCEPTED" or "201 SESSION_KEY ..."
         if (!preg_match('/^(200|201)\s+(\S+)\s+/', $response, $matches)) {
-            throw new $this->parseAuthFailure($response);
+            throw $this->parseAuthFailure($response);
         }
 
         $this->sessionKey = $matches[2];

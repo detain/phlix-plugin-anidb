@@ -1078,7 +1078,7 @@ final class AnidbMetadataProvider implements LifecycleInterface
             'poster_url'   => $posterUrl,
             'fanart_url'   => null,
             'episodes'     => $anime['episodes'] ?: null,
-            'type'         => $anime['type'],
+            'type'         => is_string($anime['type']) ? $this->mapType($anime['type']) : null,
             'anidb_id'     => $anime['aid'],
             'titles'       => array_values(array_unique($allTitles)),
             'status'       => $this->mapAnimeStatus($anime),
@@ -1109,5 +1109,29 @@ final class AnidbMetadataProvider implements LifecycleInterface
         }
 
         return $startDate <= $now ? 'Currently Airing' : 'Upcoming';
+    }
+
+    /**
+     * Map AniDB type strings to normalized lowercase identifiers.
+     *
+     * @param string|null $type Raw type from AniDB (e.g. 'TV Series', 'Movie', 'OVA').
+     *
+     * @return string|null Normalized type string or null for empty input.
+     */
+    private function mapType(?string $type): ?string
+    {
+        if ($type === null || $type === '') {
+            return null;
+        }
+
+        return match (mb_strtolower($type)) {
+            'tv series', 'tv' => 'tv',
+            'movie' => 'movie',
+            'ova' => 'ova',
+            'special' => 'special',
+            'ona' => 'ona',
+            'music' => 'music',
+            default => mb_strtolower($type),
+        };
     }
 }

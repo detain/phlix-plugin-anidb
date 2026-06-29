@@ -33,18 +33,6 @@ parameters:
             path: src/AnidbMetadataProvider.php
 
         -
-            message: '#^Parameter \#1 \$string of function trim expects string, string\|null given\.$#'
-            identifier: argument.type
-            count: 1
-            path: src/AnidbMetadataProvider.php
-
-        -
-            message: '#^Parameter \#3 \$subject of function preg_replace expects array\<float\|int\|string\>|string, string\|null given\.$#'
-            identifier: argument.type
-            count: 10
-            path: src/AnidbMetadataProvider.php
-
-        -
             message: '#^Parameter \#4 \.\.\.\$arrays of function array_merge expects array, mixed given\.$#'
             identifier: argument.type
             count: 1
@@ -57,10 +45,22 @@ parameters:
             path: src/AnidbMetadataProvider.php
 
         -
+            message: '#^Parameter \#1 \$string of function trim expects string, string\|null given\.$#'
+            identifier: argument.type
+            count: 1
+            path: src/Parser/FilenameTitleExtractor.php
+
+        -
+            message: '#^Parameter \#3 \$subject of function preg_replace expects array\<float\|int\|string\>|string, string\|null given\.$#'
+            identifier: argument.type
+            count: 10
+            path: src/Parser/FilenameTitleExtractor.php
+
+        -
             message: '#^Ternary operator condition is always true\.$#'
             identifier: ternary.alwaysTrue
             count: 1
-            path: src/AnidbMetadataProvider.php
+            path: src/Parser/FilenameTitleExtractor.php
 
         -
             message: '#^Parameter \#1 \$socket of function socket_close expects Socket, resource given\.$#'

@@ -1,0 +1,93 @@
+parameters:
+    level: 9
+    paths:
+        - src
+    bootstrapFiles:
+        - vendor/autoload.php
+    treatPhpDocTypesAsCertain: false
+    excludePaths:
+        - src/AnidbMetadataProviderAdapter.php
+    ignoreErrors:
+        -
+            message: '#^Binary operation "\." between ''https\://api\.anidb…'' and mixed results in an error\.$#'
+            identifier: binaryOp.invalid
+            count: 1
+            path: src/AnidbMetadataProvider.php
+
+        -
+            message: '#^Constant Phlix\\Anidb\\AnidbMetadataProvider\:\:SESSION_TIMEOUT_SEC is unused\.$#'
+            identifier: classConstant.unused
+            count: 1
+            path: src/AnidbMetadataProvider.php
+
+        -
+            message: '#^Method Phlix\\Anidb\\AnidbMetadataProvider\:\:mapAnimeStatus\(\) never returns null so it can be removed from the return type\.$#'
+            identifier: return.unusedType
+            count: 1
+            path: src/AnidbMetadataProvider.php
+
+        -
+            message: '#^Parameter \#1 \$array of function array_unique expects an array of values castable to string, array\<mixed, mixed\> given\.$#'
+            identifier: argument.type
+            count: 1
+            path: src/AnidbMetadataProvider.php
+
+        -
+            message: '#^Parameter \#1 \$string of function trim expects string, string\|null given\.$#'
+            identifier: argument.type
+            count: 1
+            path: src/AnidbMetadataProvider.php
+
+        -
+            message: '#^Parameter \#3 \$subject of function preg_replace expects array\<float\|int\|string\>|string, string\|null given\.$#'
+            identifier: argument.type
+            count: 10
+            path: src/AnidbMetadataProvider.php
+
+        -
+            message: '#^Parameter \#4 \.\.\.\$arrays of function array_merge expects array, mixed given\.$#'
+            identifier: argument.type
+            count: 1
+            path: src/AnidbMetadataProvider.php
+
+        -
+            message: '#^Property Phlix\\Anidb\\AnidbMetadataProvider\:\:\$container is never read, only written\.$#'
+            identifier: property.onlyWritten
+            count: 1
+            path: src/AnidbMetadataProvider.php
+
+        -
+            message: '#^Ternary operator condition is always true\.$#'
+            identifier: ternary.alwaysTrue
+            count: 1
+            path: src/AnidbMetadataProvider.php
+
+        -
+            message: '#^Parameter \#1 \$socket of function socket_close expects Socket, resource given\.$#'
+            identifier: argument.type
+            count: 1
+            path: src/Udp/SocketUdpClient.php
+
+        -
+            message: '#^Parameter \#1 \$socket of function socket_recvfrom expects Socket, resource given\.$#'
+            identifier: argument.type
+            count: 1
+            path: src/Udp/SocketUdpClient.php
+
+        -
+            message: '#^Parameter \#1 \$socket of function socket_sendto expects Socket, resource given\.$#'
+            identifier: argument.type
+            count: 1
+            path: src/Udp/SocketUdpClient.php
+
+        -
+            message: '#^Property Phlix\\Anidb\\Udp\\SocketUdpClient\:\:\$socket \(resource\|null\) does not accept Socket\|false\.$#'
+            identifier: assign.propertyType
+            count: 1
+            path: src/Udp/SocketUdpClient.php
+
+        -
+            message: '#^Property Phlix\\Anidb\\Udp\\SocketUdpClient\:\:\$socket \(resource\|null\) is never assigned resource so it can be removed from the property type\.$#'
+            identifier: property.unusedType
+            count: 1
+            path: src/Udp/SocketUdpClient.php

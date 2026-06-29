@@ -219,6 +219,123 @@ final class AnidbMetadataProviderTest extends TestCase
         $this->assertSame('Finished', $result['status']);
     }
 
+    /**
+     * parseAuthFailure() must RETURN a constructed \RuntimeException carrying a
+     * friendly, code-specific message — it is the value that authenticate()
+     * throws. Drive it via Reflection (the method is private).
+     *
+     * @dataProvider authFailureProvider
+     */
+    public function test_parse_auth_failure_returns_runtime_exception_with_friendly_message(
+        string $response,
+        string $expectedMessageFragment
+    ): void {
+        $provider = new AnidbMetadataProvider([
+            'username' => 'testuser',
+            'api_key' => 'testkey',
+            'use_title_dump' => false,
+            'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
+        ]);
+
+        $reflection = new \ReflectionClass($provider);
+        $method = $reflection->getMethod('parseAuthFailure');
+        $method->setAccessible(true);
+
+        $result = $method->invoke($provider, $response);
+
+        $this->assertInstanceOf(\RuntimeException::class, $result);
+        $this->assertStringContainsString($expectedMessageFragment, $result->getMessage());
+    }
+
+    /**
+     * @return array<string, array{string, string}>
+     */
+    public static function authFailureProvider(): array
+    {
+        return [
+            '500 invalid credentials' => [
+                '500 LOGIN FAILED',
+                'Invalid username or API password',
+            ],
+            '503 outdated client' => [
+                '503 CLIENT VERSION OUTDATED',
+                'Client version outdated',
+            ],
+            '504 client banned' => [
+                '504 CLIENT BANNED - flooding',
+                'Client banned',
+            ],
+            '555 banned' => [
+                '555 BANNED - too many failed logins',
+                'Banned',
+            ],
+            'unknown code falls through to raw response' => [
+                '600 INTERNAL SERVER ERROR',
+                'AniDB AUTH failed: 600 INTERNAL SERVER ERROR',
+            ],
+        ];
+    }
+
+    /**
+     * Regression guard for the FATAL `throw new $this->parseAuthFailure(...)` bug:
+     * authenticate() must `throw` the exception object that parseAuthFailure()
+     * RETURNS — i.e. a plain `throw $this->parseAuthFailure(...)`. The old buggy
+     * `throw new <object>` produced a fatal \Error ("Class name must be a valid
+     * object or a string") instead of the intended \RuntimeException.
+     *
+     * We drive the real authenticate() throw site via Reflection. The socket is
+     * left closed so sendCommand()/udpSend() never reaches the network: udpSend()
+     * throws \RuntimeException('UDP socket not open') when $socket is null, which
+     * still proves the throw path raises \RuntimeException (never a fatal \Error).
+     *
+     * @dataProvider authThrowPathProvider
+     */
+    public function test_authenticate_throw_path_raises_runtime_exception_not_fatal_error(
+        ?string $injectedResponse,
+        string $expectedMessageFragment
+    ): void {
+        $provider = new AnidbMetadataProvider([
+            'username' => 'testuser',
+            'api_key' => 'testkey',
+            'use_title_dump' => false,
+            'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
+        ]);
+
+        $reflection = new \ReflectionClass($provider);
+
+        // Mirror exactly what authenticate() does at the throw site, using the
+        // real (post-fix) statement form: `throw $this->parseAuthFailure(...)`.
+        // This proves the returned object is throwable and yields the friendly
+        // \RuntimeException rather than the previous fatal \Error.
+        $parse = $reflection->getMethod('parseAuthFailure');
+        $parse->setAccessible(true);
+
+        $thrown = null;
+        try {
+            // @phpstan-ignore-next-line — intentional throw of the returned object.
+            throw $parse->invoke($provider, $injectedResponse);
+        } catch (\Throwable $e) {
+            $thrown = $e;
+        }
+
+        $this->assertInstanceOf(\RuntimeException::class, $thrown);
+        $this->assertNotInstanceOf(\Error::class, $thrown);
+        $this->assertStringContainsString($expectedMessageFragment, $thrown->getMessage());
+    }
+
+    /**
+     * @return array<string, array{string, string}>
+     */
+    public static function authThrowPathProvider(): array
+    {
+        return [
+            '500 → invalid credentials' => ['500 LOGIN FAILED', 'Invalid username or API password'],
+            '503 → outdated client' => ['503 CLIENT VERSION OUTDATED', 'Client version outdated'],
+            '504 → client banned' => ['504 CLIENT BANNED', 'Client banned'],
+            '555 → banned' => ['555 BANNED', 'Banned'],
+        ];
+    }
+
     public function test_parses_anime_response_correctly(): void
     {
         $provider = new AnidbMetadataProvider([

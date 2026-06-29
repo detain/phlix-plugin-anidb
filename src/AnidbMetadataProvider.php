@@ -7,6 +7,7 @@ namespace Phlix\Anidb;
 use Phlix\Anidb\Dto\AnimeDto;
 use Phlix\Anidb\Parser\FilenameTitleExtractor;
 use Phlix\Anidb\TitleDump\TitleDumpIndexer;
+use Phlix\Anidb\TitleDump\TitleDumpManager;
 use Phlix\Anidb\Udp\ProductionWaiter;
 use Phlix\Anidb\Udp\SocketUdpClient;
 use Phlix\Anidb\Udp\UdpClientInterface;
@@ -132,18 +133,17 @@ final class AnidbMetadataProvider implements LifecycleInterface
     private AnimeResponseParser $animeParser;
 
     /**
-     * Title dump index for fast offline search.
-     *
-     * Grouped by AID: list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}>
-     *
-     * @var list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}>|null
-     */
-    private ?array $titleIndex = null;
-
-    /**
      * Filename title extractor seam — pure string manipulation, no network I/O.
      */
     private FilenameTitleExtractor $filenameExtractor;
+
+    /**
+     * Title dump manager seam — owns the title index lifecycle.
+     *
+     * Nullable so it can be initialized lazily in onEnable() once settings are
+     * known. When null, title-dump search is skipped (UDP fallback only).
+     */
+    private ?TitleDumpManager $titleDumpManager = null;
 
     /**
      * Path to cached title dump file.
@@ -165,6 +165,9 @@ final class AnidbMetadataProvider implements LifecycleInterface
      *     Defaults to {@see AnimeResponseParser}. Inject a mock in tests.
      * @param FilenameTitleExtractor|null $filenameExtractor Seam for title extraction.
      *     Defaults to a new instance. Inject a stub in tests to verify call counts.
+     * @param TitleDumpManager|null $titleDumpManager Seam for title-dump search.
+     *     Defaults to null (initialized lazily in onEnable when use_title_dump is true).
+     *     Inject a stub in tests to verify call counts or provide a pre-built index.
      */
     public function __construct(
         array $settings,
@@ -172,6 +175,7 @@ final class AnidbMetadataProvider implements LifecycleInterface
         ?WaiterInterface $waiter = null,
         ?AnimeResponseParser $animeParser = null,
         ?FilenameTitleExtractor $filenameExtractor = null,
+        ?TitleDumpManager $titleDumpManager = null,
     ) {
         $this->settings = $settings;
         $this->cacheDir = dirname(__DIR__) . '/var/plugins/phlix-plugin-anidb';
@@ -182,6 +186,7 @@ final class AnidbMetadataProvider implements LifecycleInterface
         $this->waiter = $waiter ?? new ProductionWaiter();
         $this->animeParser = $animeParser ?? new AnimeResponseParser();
         $this->filenameExtractor = $filenameExtractor ?? new FilenameTitleExtractor();
+        $this->titleDumpManager = $titleDumpManager;
     }
 
     /**
@@ -202,8 +207,13 @@ final class AnidbMetadataProvider implements LifecycleInterface
         $this->openSocket();
 
         // Lazy-load title index on first lookup if enabled
-        if ($this->settings['use_title_dump']) {
-            $this->ensureCacheDir();
+        if ($this->settings['use_title_dump'] && $this->titleDumpManager === null) {
+            $this->titleDumpManager = new TitleDumpManager(
+                $this->cacheDir,
+                $this->settings['title_dump_url'],
+            );
+            $this->titleDumpManager->ensureCacheDir();
+            $this->titleDumpManager->ensureLoaded();
         }
 
         // Self-register with the host MetadataManager so the server's metadata
@@ -644,8 +654,8 @@ final class AnidbMetadataProvider implements LifecycleInterface
     private function findAidByTitle(string $title): ?int
     {
         // Try title dump first (fast, no API quota cost)
-        if ($this->settings['use_title_dump']) {
-            $aid = $this->searchTitleDump($title);
+        if ($this->settings['use_title_dump'] && $this->titleDumpManager !== null) {
+            $aid = $this->titleDumpManager->search($title);
             if ($aid !== null) {
                 return $aid;
             }
@@ -667,70 +677,6 @@ final class AnidbMetadataProvider implements LifecycleInterface
     }
 
     /**
-     * Search the title dump index for a matching anime.
-     *
-     * The index is grouped by AID. Each entry contains:
-     *   ["aid" => 12345, "titles" => [["title" => "...", "type" => "main", "lang" => "en"], ...]]
-     *
-     * Search prioritizes exact matches, then prefix matches (longest first),
-     * then contains matches (longest first).
-     *
-     * @param string $query Title to search for.
-     *
-     * @return int|null Best-matching AID or null.
-     */
-    private function searchTitleDump(string $query): ?int
-    {
-        $this->ensureTitleIndexLoaded();
-
-        if ($this->titleIndex === null) {
-            return null;
-        }
-
-        $queryLower = mb_strtolower($query);
-        $queryLen = mb_strlen($query);
-        $bestAID = null;
-        $bestScore = 0;
-
-        foreach ($this->titleIndex as $entry) {
-            $aid = $entry['aid'];
-            $titles = $entry['titles'];
-
-            foreach ($titles as $titleEntry) {
-                $titleLower = $titleEntry['lower_title'] ?? mb_strtolower($titleEntry['title']);
-                $titleLen = mb_strlen($titleEntry['title']);
-
-                // Exact match: return immediately
-                if ($titleLower === $queryLower) {
-                    return $aid;
-                }
-
-                // Prefix match: score = 800 - abs(len(query) - len(title))
-                // Prefer titles closer in length to the query
-                if (str_starts_with($titleLower, $queryLower)) {
-                    $score = 800 - abs($queryLen - $titleLen);
-                    if ($score > $bestScore) {
-                        $bestScore = $score;
-                        $bestAID = $aid;
-                    }
-                }
-
-                // Contains match: score = 600 - abs(len(query) - len(title))
-                // Use elseif so prefix match always wins over contains when both apply
-                elseif (str_contains($titleLower, $queryLower)) {
-                    $score = 600 - abs($queryLen - $titleLen);
-                    if ($score > $bestScore) {
-                        $bestScore = $score;
-                        $bestAID = $aid;
-                    }
-                }
-            }
-        }
-
-        return $bestAID;
-    }
-
-    /**
      * Load the title dump index from cache if not yet loaded.
      *
      * The cached index uses the grouped format:
@@ -741,36 +687,6 @@ final class AnidbMetadataProvider implements LifecycleInterface
      *
      * @return void
      */
-    private function ensureTitleIndexLoaded(): void
-    {
-        if ($this->titleIndex !== null) {
-            return;
-        }
-
-        $indexFile = $this->cacheDir . '/title_index.json';
-
-        if (file_exists($indexFile) && is_readable($indexFile)) {
-            $data = file_get_contents($indexFile);
-            if ($data !== false) {
-                /** @var mixed $decoded */
-                $decoded = json_decode($data, true);
-                if (is_array($decoded)) {
-                    $validEntries = $this->validateTitleIndexSchema($decoded);
-                    if ($validEntries !== []) {
-                        $this->titleIndex = $validEntries;
-                        return;
-                    }
-
-                    error_log(
-                        'AnidbMetadataProvider: title_index.json contained no valid entries, falling back to empty index'
-                    );
-                }
-            }
-        }
-
-        // If no cached index, we'll rely on API lookups
-        $this->titleIndex = [];
-    }
 
     /**
      * Validate the title index entries against the expected schema.
@@ -788,79 +704,9 @@ final class AnidbMetadataProvider implements LifecycleInterface
      *
      * @return list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}>
      */
-    private function validateTitleIndexSchema(array $entries): array
-    {
-        /** @var list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}> $validEntries */
-        $validEntries = [];
 
-        foreach ($entries as $entry) {
-            if (!is_array($entry)) {
-                continue;
-            }
-
-            // Validate 'aid' is an int
-            if (!isset($entry['aid']) || !is_int($entry['aid'])) {
-                continue;
-            }
-
-            // Validate 'titles' is an array
-            if (!isset($entry['titles']) || !is_array($entry['titles'])) {
-                continue;
-            }
-
-            /** @var list<array{title: string, type: string, lang: string}> $validatedTitles */
-            $validatedTitles = [];
-
-            foreach ($entry['titles'] as $title) {
-                if (!is_array($title)) {
-                    continue 2;
-                }
-
-                if (
-                    !isset($title['title'], $title['type'], $title['lang'])
-                    || !is_string($title['title'])
-                    || !is_string($title['type'])
-                    || !is_string($title['lang'])
-                ) {
-                    continue 2;
-                }
-
-                $validatedTitles[] = [
-                    'title' => $title['title'],
-                    'type' => $title['type'],
-                    'lang' => $title['lang'],
-                ];
-            }
-
-            $validEntries[] = [
-                'aid' => $entry['aid'],
-                'titles' => $validatedTitles,
-            ];
-        }
-
-        return $validEntries;
-    }
-
-    /**
-     * Ensure the cache directory exists and the title index is up to date.
-     *
-     * @return void
-     */
-    private function ensureCacheDir(): void
-    {
-        if (!is_dir($this->cacheDir)) {
-            mkdir($this->cacheDir, 0755, true);
-        }
-
-        // Build and persist the title index if not present or stale.
-        // This runs once on plugin enable; subsequent lookups reuse the cached index.
-        $indexer = new TitleDumpIndexer(
-            $this->cacheDir,
-            $this->settings['title_dump_url'],
-        );
-        $indexer->downloadAndIndex();
-    }
-
+    // -------------------------------------------------------------------------
+    // Private: Anime Details Fetch & Parse
     // -------------------------------------------------------------------------
     // Private: Anime Details Fetch & Parse
     // -------------------------------------------------------------------------

@@ -7,25 +7,22 @@ namespace Phlix\Anidb\TitleDump;
 /**
  * Manages the AniDB title dump index for fast offline title→AID lookups.
  *
- * Wraps {@see TitleDumpIndexer} to provide:
- * - Lazy loading of the cached title index on first search
- * - Title search with scoring (exact > prefix > contains)
+ * Owns the title index lifecycle: loading from cache, downloading via
+ * {@see TitleDumpIndexer}, validation, and search.
  *
- * The title index is grouped by AID:
- *   [
- *     ["aid" => 12345, "titles" => [["title" => "...", "type" => "main", "lang" => "en"], ...]],
- *     ...
- *   ]
- *
- * Search prioritizes exact matches, then prefix matches (longest first),
- * then contains matches (longest first).
- *
- * @package Phlix\Anidb\TitleDump
+ * This class replaces duplicate methods in {@see \Phlix\Anidb\AnidbMetadataProvider}:
+ * - search() replaces AnidbMetadataProvider::searchTitleDump()
+ * - ensureLoaded() replaces AnidbMetadataProvider::ensureTitleIndexLoaded()
+ * - validateSchema() (private) replaces AnidbMetadataProvider::validateTitleIndexSchema()
+ * - ensureCacheDir() replaces AnidbMetadataProvider::ensureCacheDir()
+ * - getTitleCachePath() replaces inline path construction
  */
 final class TitleDumpManager
 {
     /**
-     * Title dump index grouped by AID.
+     * Title dump index for fast offline search.
+     *
+     * Grouped by AID: list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}>
      *
      * @var list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}>|null
      */
@@ -42,51 +39,13 @@ final class TitleDumpManager
     private string $titleDumpUrl;
 
     /**
-     * @param string $cacheDir     Directory storing the index file.
+     * @param string $cacheDir     Directory for cached index file.
      * @param string $titleDumpUrl URL to anime-titles.dat.gz.
      */
-    public function __construct(
-        string $cacheDir,
-        string $titleDumpUrl,
-    ) {
+    public function __construct(string $cacheDir, string $titleDumpUrl)
+    {
         $this->cacheDir = $cacheDir;
         $this->titleDumpUrl = $titleDumpUrl;
-    }
-
-    /**
-     * Load the title dump index from cache if not yet loaded.
-     *
-     * @return void
-     */
-    public function ensureLoaded(): void
-    {
-        if ($this->titleIndex !== null) {
-            return;
-        }
-
-        $indexFile = $this->getTitleCachePath();
-
-        if (is_file($indexFile) && is_readable($indexFile)) {
-            $data = file_get_contents($indexFile);
-            if ($data !== false) {
-                /** @var mixed $decoded */
-                $decoded = json_decode($data, true);
-                if (is_array($decoded)) {
-                    $validEntries = $this->validateSchema($decoded);
-                    if ($validEntries !== []) {
-                        $this->titleIndex = $validEntries;
-                        return;
-                    }
-
-                    error_log(
-                        'TitleDumpManager: title_index.json contained no valid entries, falling back to empty index'
-                    );
-                }
-            }
-        }
-
-        // If no cached index, rely on API lookups
-        $this->titleIndex = [];
     }
 
     /**
@@ -94,6 +53,9 @@ final class TitleDumpManager
      *
      * The index is grouped by AID. Each entry contains:
      *   ["aid" => 12345, "titles" => [["title" => "...", "type" => "main", "lang" => "en"], ...]]
+     *
+     * Search prioritizes exact matches, then prefix matches (longest first),
+     * then contains matches (longest first).
      *
      * @param string $query Title to search for.
      *
@@ -148,6 +110,42 @@ final class TitleDumpManager
         }
 
         return $bestAID;
+    }
+
+    /**
+     * Load the title dump index from cache if not yet loaded.
+     *
+     * @return void
+     */
+    public function ensureLoaded(): void
+    {
+        if ($this->titleIndex !== null) {
+            return;
+        }
+
+        $indexFile = $this->getTitleCachePath();
+
+        if (file_exists($indexFile) && is_readable($indexFile)) {
+            $data = file_get_contents($indexFile);
+            if ($data !== false) {
+                /** @var mixed $decoded */
+                $decoded = json_decode($data, true);
+                if (is_array($decoded)) {
+                    $validEntries = $this->validateSchema($decoded);
+                    if ($validEntries !== []) {
+                        $this->titleIndex = $validEntries;
+                        return;
+                    }
+
+                    error_log(
+                        'TitleDumpManager: title_index.json contained no valid entries, falling back to empty index'
+                    );
+                }
+            }
+        }
+
+        // If no cached index, we'll rely on API lookups
+        $this->titleIndex = [];
     }
 
     /**
@@ -240,9 +238,9 @@ final class TitleDumpManager
     }
 
     /**
-     * Get the path to the title index cache file.
+     * Return the path to the cached title index file.
      *
-     * @return string
+     * @return string Absolute path to title_index.json.
      */
     public function getTitleCachePath(): string
     {
@@ -250,9 +248,9 @@ final class TitleDumpManager
     }
 
     /**
-     * Whether the title index is loaded.
+     * Check if the title index has been loaded.
      *
-     * @return bool
+     * @return bool True if loaded (even if empty), false if not yet loaded.
      */
     public function isLoaded(): bool
     {
@@ -260,7 +258,7 @@ final class TitleDumpManager
     }
 
     /**
-     * Inject a title index directly (for testing).
+     * Inject a pre-built index for testing purposes.
      *
      * @param list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}> $index
      *

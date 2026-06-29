@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace Phlix\Anidb\Tests\Unit;
 
-use Phlix\Anidb\AnidbMetadataProvider;
+use Phlix\Anidb\TitleDump\TitleDumpManager;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Unit tests for title_index.json schema validation in AnidbMetadataProvider.
+ * Unit tests for title_index.json schema validation in TitleDumpManager.
  */
 final class TitleIndexSchemaValidationTest extends TestCase
 {
@@ -26,30 +26,25 @@ final class TitleIndexSchemaValidationTest extends TestCase
         // Clean up temp files
         $files = glob($this->tempDir . '/*');
         foreach ($files as $file) {
-            unlink($file);
+            if (is_file($file)) {
+                unlink($file);
+            }
         }
-        rmdir($this->tempDir);
+        if (is_dir($this->tempDir)) {
+            rmdir($this->tempDir);
+        }
         parent::tearDown();
     }
 
     /**
-     * Create a provider with a custom cache dir pointing to our temp directory.
+     * Create a TitleDumpManager with a custom cache dir pointing to our temp directory.
      */
-    private function createProvider(string $cacheDir): AnidbMetadataProvider
+    private function createManager(string $cacheDir): TitleDumpManager
     {
-        $provider = new AnidbMetadataProvider([
-            'username' => 'testuser',
-            'api_key' => 'testkey',
-            'use_title_dump' => true,
-            'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
-        ]);
-
-        $reflection = new \ReflectionClass($provider);
-        $cacheDirProp = $reflection->getProperty('cacheDir');
-        $cacheDirProp->setAccessible(true);
-        $cacheDirProp->setValue($provider, $cacheDir);
-
-        return $provider;
+        return new TitleDumpManager(
+            $cacheDir,
+            'http://example.com/anime-titles.dat.gz',
+        );
     }
 
     public function test_valid_entries_load_and_are_used(): void
@@ -72,20 +67,12 @@ final class TitleIndexSchemaValidationTest extends TestCase
         ];
         file_put_contents($indexFile, json_encode($validData));
 
-        $provider = $this->createProvider($this->tempDir);
-        $reflection = new \ReflectionClass($provider);
-        $method = $reflection->getMethod('ensureTitleIndexLoaded');
-        $method->setAccessible(true);
-        $method->invoke($provider);
+        $manager = $this->createManager($this->tempDir);
+        $manager->ensureLoaded();
 
-        $titleIndexProp = $reflection->getProperty('titleIndex');
-        $titleIndexProp->setAccessible(true);
-        $titleIndex = $titleIndexProp->getValue($provider);
-
-        $this->assertCount(2, $titleIndex);
-        $this->assertSame(12345, $titleIndex[0]['aid']);
-        $this->assertSame('Fate/stay night', $titleIndex[0]['titles'][0]['title']);
-        $this->assertSame(67890, $titleIndex[1]['aid']);
+        // Test via search to verify the index was loaded correctly
+        $this->assertSame(12345, $manager->search('Fate/stay night'));
+        $this->assertSame(67890, $manager->search('Cowboy Bebop'));
     }
 
     public function test_wrong_typed_aid_rejected_others_accepted(): void
@@ -114,20 +101,14 @@ final class TitleIndexSchemaValidationTest extends TestCase
         ];
         file_put_contents($indexFile, json_encode($mixedData));
 
-        $provider = $this->createProvider($this->tempDir);
-        $reflection = new \ReflectionClass($provider);
-        $method = $reflection->getMethod('ensureTitleIndexLoaded');
-        $method->setAccessible(true);
-        $method->invoke($provider);
-
-        $titleIndexProp = $reflection->getProperty('titleIndex');
-        $titleIndexProp->setAccessible(true);
-        $titleIndex = $titleIndexProp->getValue($provider);
+        $manager = $this->createManager($this->tempDir);
+        $manager->ensureLoaded();
 
         // Only the valid entries (index 0 and 2) should be loaded
-        $this->assertCount(2, $titleIndex);
-        $this->assertSame(12345, $titleIndex[0]['aid']);
-        $this->assertSame(67890, $titleIndex[1]['aid']);
+        $this->assertSame(12345, $manager->search('Valid Anime'));
+        $this->assertSame(67890, $manager->search('Another Valid'));
+        // Entry with string AID should not be found
+        $this->assertNull($manager->search('Invalid Anime'));
     }
 
     public function test_missing_titles_key_rejected(): void
@@ -154,20 +135,14 @@ final class TitleIndexSchemaValidationTest extends TestCase
         ];
         file_put_contents($indexFile, json_encode($mixedData));
 
-        $provider = $this->createProvider($this->tempDir);
-        $reflection = new \ReflectionClass($provider);
-        $method = $reflection->getMethod('ensureTitleIndexLoaded');
-        $method->setAccessible(true);
-        $method->invoke($provider);
-
-        $titleIndexProp = $reflection->getProperty('titleIndex');
-        $titleIndexProp->setAccessible(true);
-        $titleIndex = $titleIndexProp->getValue($provider);
+        $manager = $this->createManager($this->tempDir);
+        $manager->ensureLoaded();
 
         // Only the entries with proper 'titles' key should be loaded
-        $this->assertCount(2, $titleIndex);
-        $this->assertSame(12345, $titleIndex[0]['aid']);
-        $this->assertSame(11111, $titleIndex[1]['aid']);
+        $this->assertSame(12345, $manager->search('Valid Anime'));
+        $this->assertSame(11111, $manager->search('Also Valid'));
+        // Entry missing titles should not be found
+        $this->assertNull($manager->search('Missing Titles'));
     }
 
     public function test_non_array_root_falls_back_to_empty(): void
@@ -177,18 +152,11 @@ final class TitleIndexSchemaValidationTest extends TestCase
         // Non-array root (string instead of array)
         file_put_contents($indexFile, json_encode('this is not an array'));
 
-        $provider = $this->createProvider($this->tempDir);
-        $reflection = new \ReflectionClass($provider);
-        $method = $reflection->getMethod('ensureTitleIndexLoaded');
-        $method->setAccessible(true);
-        $method->invoke($provider);
+        $manager = $this->createManager($this->tempDir);
+        $manager->ensureLoaded();
 
-        $titleIndexProp = $reflection->getProperty('titleIndex');
-        $titleIndexProp->setAccessible(true);
-        $titleIndex = $titleIndexProp->getValue($provider);
-
-        // Should fall back to empty array, no fatal error
-        $this->assertSame([], $titleIndex);
+        // Should fall back to empty index, search returns null
+        $this->assertNull($manager->search('anything'));
     }
 
     public function test_junk_json_falls_back_to_empty(): void
@@ -198,34 +166,20 @@ final class TitleIndexSchemaValidationTest extends TestCase
         // Completely invalid JSON
         file_put_contents($indexFile, 'not valid json at all {{{');
 
-        $provider = $this->createProvider($this->tempDir);
-        $reflection = new \ReflectionClass($provider);
-        $method = $reflection->getMethod('ensureTitleIndexLoaded');
-        $method->setAccessible(true);
-        $method->invoke($provider);
+        $manager = $this->createManager($this->tempDir);
+        $manager->ensureLoaded();
 
-        $titleIndexProp = $reflection->getProperty('titleIndex');
-        $titleIndexProp->setAccessible(true);
-        $titleIndex = $titleIndexProp->getValue($provider);
-
-        // Should fall back to empty array, no fatal error
-        $this->assertSame([], $titleIndex);
+        // Should fall back to empty index, search returns null
+        $this->assertNull($manager->search('anything'));
     }
 
     public function test_missing_title_index_file_falls_back_to_empty(): void
     {
         // No file created - path does not exist
-        $provider = $this->createProvider($this->tempDir);
-        $reflection = new \ReflectionClass($provider);
-        $method = $reflection->getMethod('ensureTitleIndexLoaded');
-        $method->setAccessible(true);
-        $method->invoke($provider);
+        $manager = $this->createManager($this->tempDir);
+        $manager->ensureLoaded();
 
-        $titleIndexProp = $reflection->getProperty('titleIndex');
-        $titleIndexProp->setAccessible(true);
-        $titleIndex = $titleIndexProp->getValue($provider);
-
-        $this->assertSame([], $titleIndex);
+        $this->assertNull($manager->search('anything'));
     }
 
     public function test_title_entry_missing_lang_rejected(): void
@@ -243,18 +197,11 @@ final class TitleIndexSchemaValidationTest extends TestCase
         ];
         file_put_contents($indexFile, json_encode($data));
 
-        $provider = $this->createProvider($this->tempDir);
-        $reflection = new \ReflectionClass($provider);
-        $method = $reflection->getMethod('ensureTitleIndexLoaded');
-        $method->setAccessible(true);
-        $method->invoke($provider);
-
-        $titleIndexProp = $reflection->getProperty('titleIndex');
-        $titleIndexProp->setAccessible(true);
-        $titleIndex = $titleIndexProp->getValue($provider);
+        $manager = $this->createManager($this->tempDir);
+        $manager->ensureLoaded();
 
         // The entry should be rejected entirely because one of its titles is malformed
-        $this->assertSame([], $titleIndex);
+        $this->assertNull($manager->search('Valid Title'));
     }
 
     public function test_title_entry_missing_type_rejected(): void
@@ -271,17 +218,11 @@ final class TitleIndexSchemaValidationTest extends TestCase
         ];
         file_put_contents($indexFile, json_encode($data));
 
-        $provider = $this->createProvider($this->tempDir);
-        $reflection = new \ReflectionClass($provider);
-        $method = $reflection->getMethod('ensureTitleIndexLoaded');
-        $method->setAccessible(true);
-        $method->invoke($provider);
+        $manager = $this->createManager($this->tempDir);
+        $manager->ensureLoaded();
 
-        $titleIndexProp = $reflection->getProperty('titleIndex');
-        $titleIndexProp->setAccessible(true);
-        $titleIndex = $titleIndexProp->getValue($provider);
-
-        $this->assertSame([], $titleIndex);
+        // The entry should be rejected entirely
+        $this->assertNull($manager->search('Valid Title'));
     }
 
     public function test_title_entry_missing_title_field_rejected(): void
@@ -298,17 +239,11 @@ final class TitleIndexSchemaValidationTest extends TestCase
         ];
         file_put_contents($indexFile, json_encode($data));
 
-        $provider = $this->createProvider($this->tempDir);
-        $reflection = new \ReflectionClass($provider);
-        $method = $reflection->getMethod('ensureTitleIndexLoaded');
-        $method->setAccessible(true);
-        $method->invoke($provider);
+        $manager = $this->createManager($this->tempDir);
+        $manager->ensureLoaded();
 
-        $titleIndexProp = $reflection->getProperty('titleIndex');
-        $titleIndexProp->setAccessible(true);
-        $titleIndex = $titleIndexProp->getValue($provider);
-
-        $this->assertSame([], $titleIndex);
+        // The entry should be rejected entirely
+        $this->assertNull($manager->search('Valid Title'));
     }
 
     public function test_title_entry_wrong_type_for_title_rejected(): void
@@ -324,17 +259,11 @@ final class TitleIndexSchemaValidationTest extends TestCase
         ];
         file_put_contents($indexFile, json_encode($data));
 
-        $provider = $this->createProvider($this->tempDir);
-        $reflection = new \ReflectionClass($provider);
-        $method = $reflection->getMethod('ensureTitleIndexLoaded');
-        $method->setAccessible(true);
-        $method->invoke($provider);
+        $manager = $this->createManager($this->tempDir);
+        $manager->ensureLoaded();
 
-        $titleIndexProp = $reflection->getProperty('titleIndex');
-        $titleIndexProp->setAccessible(true);
-        $titleIndex = $titleIndexProp->getValue($provider);
-
-        $this->assertSame([], $titleIndex);
+        // The entry should be rejected because title is not a string
+        $this->assertNull($manager->search('12345'));
     }
 
     public function test_empty_array_root_falls_back_to_empty(): void
@@ -344,17 +273,10 @@ final class TitleIndexSchemaValidationTest extends TestCase
         // Empty array is valid JSON but has no entries
         file_put_contents($indexFile, json_encode([]));
 
-        $provider = $this->createProvider($this->tempDir);
-        $reflection = new \ReflectionClass($provider);
-        $method = $reflection->getMethod('ensureTitleIndexLoaded');
-        $method->setAccessible(true);
-        $method->invoke($provider);
+        $manager = $this->createManager($this->tempDir);
+        $manager->ensureLoaded();
 
-        $titleIndexProp = $reflection->getProperty('titleIndex');
-        $titleIndexProp->setAccessible(true);
-        $titleIndex = $titleIndexProp->getValue($provider);
-
-        $this->assertSame([], $titleIndex);
+        $this->assertNull($manager->search('anything'));
     }
 
     public function test_only_malformed_entries_falls_back_to_empty(): void
@@ -369,18 +291,10 @@ final class TitleIndexSchemaValidationTest extends TestCase
         ];
         file_put_contents($indexFile, json_encode($data));
 
-        $provider = $this->createProvider($this->tempDir);
-        $reflection = new \ReflectionClass($provider);
-        $method = $reflection->getMethod('ensureTitleIndexLoaded');
-        $method->setAccessible(true);
+        $manager = $this->createManager($this->tempDir);
+        $manager->ensureLoaded();
 
-        $method->invoke($provider);
-
-        $titleIndexProp = $reflection->getProperty('titleIndex');
-        $titleIndexProp->setAccessible(true);
-        $titleIndex = $titleIndexProp->getValue($provider);
-
-        // Should fall back to empty array
-        $this->assertSame([], $titleIndex);
+        // Should fall back to empty index
+        $this->assertNull($manager->search('x'));
     }
 }

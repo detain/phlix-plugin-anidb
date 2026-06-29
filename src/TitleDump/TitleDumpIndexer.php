@@ -145,6 +145,7 @@ final class TitleDumpIndexer
 
             $grouped[$aid]['titles'][] = [
                 'title' => $title,
+                'lower_title' => mb_strtolower($title),
                 'type'  => $type,
                 'lang'  => $lang,
             ];

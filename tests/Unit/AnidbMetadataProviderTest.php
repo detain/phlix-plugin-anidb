@@ -391,4 +391,172 @@ final class AnidbMetadataProviderTest extends TestCase
         $this->assertSame(['Seikai'], $result['synonyms']);
         $this->assertSame(['TV Series'], $result['categories']);
     }
+
+    /**
+     * 506 retry recursion guard: after 3 recursive 506 responses, sendCommand()
+     * must throw RuntimeException instead of infinite-looping.
+     */
+    public function test_506_retry_throws_after_3_retries(): void
+    {
+        // Track calls to detect infinite recursion.
+        $callCount = 0;
+
+        $fakeUdpClient = new class($callCount) implements \Phlix\Anidb\Udp\UdpClientInterface {
+            public function __construct(
+                private int &$callCounter
+            ) {}
+
+            public function open(): void {}
+
+            public function send(string $data): ?string
+            {
+                ++$this->callCounter;
+                // AUTH commands get a valid response; all other commands return 506
+                // to trigger the re-auth retry path. This lets the recursion guard
+                // kick in without authenticate() itself failing.
+                if (str_starts_with($data, 'AUTH ')) {
+                    return '200 REAUTH_SESSIONKEY LOGIN ACCEPTED';
+                }
+
+                return '506 SESSION EXPIRED';
+            }
+
+            public function close(): void {}
+
+            public function lastReplyHost(): ?string { return null; }
+
+            public function lastReplyPort(): ?int { return null; }
+        };
+
+        $provider = new \Phlix\Anidb\AnidbMetadataProvider([
+            'username' => 'testuser',
+            'api_key' => 'testkey',
+            'use_title_dump' => false,
+            'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
+        ], $fakeUdpClient, new \Phlix\Anidb\Udp\ProductionWaiter());
+
+        // Manually inject a known session key so we bypass the initial authenticate()
+        // call inside sendCommand() and jump straight into the 506 retry path.
+        $reflection = new \ReflectionClass($provider);
+        $sessionKeyProp = $reflection->getProperty('sessionKey');
+        $sessionKeyProp->setAccessible(true);
+        $sessionKeyProp->setValue($provider, 'FAKE_SESSION');
+
+        // Suppress the flood-protection waiter (no-op) so we don't wait 4s.
+        $waiterProp = $reflection->getProperty('waiter');
+        $waiterProp->setAccessible(true);
+        $waiterProp->setValue($provider, new class implements \Phlix\Anidb\Udp\WaiterInterface {
+            public function wait(float $seconds): void {}
+        });
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('AniDB session expired: re-authentication failed after 3 retries');
+
+        try {
+            $provider->lookup('/path/to/anime.mkv');
+        } catch (\RuntimeException $e) {
+            // After the fix, callCount should be 4 (1 original + 3 retries).
+            // Before the fix (infinite loop), it would be much higher.
+            if ($this->callCounter > 10) {
+                $this->fail("Infinite recursion detected: send() called {$this->callCounter} times");
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * 506 retry token correctness: the str_replace bug in the original code
+     * stripped the token from $command (which never had it) instead of
+     * $fullCommand (which did). This caused the retry to reuse the expired token.
+     * The fix replaces from $fullCommand, so the retry correctly uses the
+     * new session key obtained after re-authentication.
+     */
+    public function test_506_retry_uses_correct_new_session_key(): void
+    {
+        $sentData = [];
+
+        $fakeUdpClient = new class($sentData) implements \Phlix\Anidb\Udp\UdpClientInterface {
+            public function __construct(
+                private array &$sentDataLog
+            ) {}
+
+            public function open(): void {}
+
+            public function send(string $data): ?string
+            {
+                $this->sentDataLog[] = $data;
+
+                // AUTH commands get a valid response with NEW session key.
+                // All other commands: first call returns 506, subsequent return 200.
+                if (str_starts_with($data, 'AUTH ')) {
+                    // Return format: "200 SESSIONKEY LOGIN ACCEPTED"
+                    return '200 NEW_SESSIONKEY LOGIN ACCEPTED';
+                }
+
+                // Non-AUTH commands: track how many we've seen.
+                static $cmdCallCount = 0;
+                ++$cmdCallCount;
+
+                // First command call: 506 to trigger re-auth + retry.
+                // Retry command call (after re-auth): 200 success.
+                return $cmdCallCount === 1 ? '506 SESSION EXPIRED' : '200 OK';
+            }
+
+            public function close(): void {}
+
+            public function lastReplyHost(): ?string { return null; }
+
+            public function lastReplyPort(): ?int { return null; }
+        };
+
+        $provider = new \Phlix\Anidb\AnidbMetadataProvider([
+            'username' => 'testuser',
+            'api_key' => 'testkey',
+            'use_title_dump' => false,
+            'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
+        ], $fakeUdpClient, new \Phlix\Anidb\Udp\ProductionWaiter());
+
+        $reflection = new \ReflectionClass($provider);
+
+        // Pre-set an old session key so we enter sendCommand's 506 path.
+        $sessionKeyProp = $reflection->getProperty('sessionKey');
+        $sessionKeyProp->setAccessible(true);
+        $sessionKeyProp->setValue($provider, 'OLD_SESSION');
+
+        // No-op waiter.
+        $waiterProp = $reflection->getProperty('waiter');
+        $waiterProp->setAccessible(true);
+        $waiterProp->setValue($provider, new class implements \Phlix\Anidb\Udp\WaiterInterface {
+            public function wait(float $seconds): void {}
+        });
+
+        // Call sendCommand directly via reflection to isolate the 506 path.
+        $sendCommand = $reflection->getMethod('sendCommand');
+        $sendCommand->setAccessible(true);
+
+        $result = $sendCommand->invoke($provider, 'TESTCMD');
+
+        // We expect success (200 OK).
+        $this->assertSame('200 OK', $result);
+
+        // Verify the data that was sent:
+        // [0] = original command with OLD_SESSION (TESTCMD&s=OLD_SESSION)
+        // [1] = AUTH with NEW_SESSIONKEY (from the re-auth inside 506 handler)
+        // [2] = retry command with NEW_SESSIONKEY (TESTCMD&s=NEW_SESSIONKEY)
+        $this->assertCount(3, $sentData);
+
+        // First send: original command with OLD session (before 506 was detected).
+        $this->assertStringContainsString('s=OLD_SESSION', $sentData[0]);
+        $this->assertStringContainsString('TESTCMD', $sentData[0]);
+
+        // AUTH send: does NOT have a session key (it goes to establish the session).
+        $this->assertStringContainsString('AUTH ', $sentData[1]);
+        // The AUTH command format is 'AUTH user=...&pass=...' - no &s= parameter.
+        $this->assertStringNotContainsString('&s=', $sentData[1]);
+
+        // Third send (retry after re-auth): MUST have NEW session key.
+        // This is the critical assertion that the $command→$fullCommand fix enables.
+        $this->assertStringContainsString('s=NEW_SESSIONKEY', $sentData[2]);
+        $this->assertStringContainsString('TESTCMD', $sentData[2]);
+    }
 }

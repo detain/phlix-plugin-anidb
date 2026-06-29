@@ -16,10 +16,10 @@ This plugin fetches structured anime metadata from [AniDB](https://anidb.net/) u
 
 - **Title dump search** — fast fuzzy-match search against all AniDB anime titles
 - **Full metadata** — romaji/english/kanji titles, synonyms, genres, year, type, rating
-- **Episode info** — episode count, special episodes
 - **Description** — fetch long descriptions via separate ANIMEDESC command
 - **Flood protection** — 4-second rate limiting between API calls (per AniDB rules)
 - **Session management** — keepalive pings every 30 min, auto-reconnect on 506 INVALID SESSION
+- **Episode info** — planned (not yet implemented)
 
 ## Install
 
@@ -50,14 +50,20 @@ The plugin is unsigned by design. Install via the Phlix admin UI:
 
 ## How It Works
 
-When the MetadataManager calls `lookup($filePath)`:
+The plugin registers an `AnidbMetadataProviderAdapter` with the host MetadataManager.
+When the server needs anime metadata it calls the adapter's `search()` or
+`getDetails()` methods (the adapter's `lookup()` method is also available for
+file-path-based lookups):
 
-1. **Parse filename** — extract anime title from file path (strips S##E##, group tags, resolution suffixes)
-2. **Title search** — search local title dump index for best match (no API call)
-3. **Fallback** — if no dump match, send `ANIME aname=...` via UDP API
-4. **Fetch details** — send `ANIME aid=...` for full anime data
-5. **Fetch description** — send `ANIMEDESC aid=...` for the full synopsis
-6. **Map response** — translate AniDB field layout to MetadataManager's expected return shape
+1. **search(title)** — resolve an anime title to an AID using the title dump or API fallback
+2. **getDetails(aid)** — fetch full anime metadata by AID
+3. **lookup(filePath)** — extract anime name from a file path and return metadata
+
+Internal flow (when `lookup()` or `getDetails()` is called):
+
+1. **Fetch details** — send `ANIME aid=...` for full anime data
+2. **Fetch description** — send `ANIMEDESC aid=...` for the full synopsis
+3. **Map response** — translate AniDB field layout to MetadataManager's expected return shape
 
 ## AniDB Protocol Notes
 
@@ -73,21 +79,21 @@ See the [AniDB UDP API docs](https://wiki.anidb.net/UDP_API_Definition) for full
 ```php
 [
     'title'         => 'Seikai no Monshou',      // Primary romanized title
-    'original_name' => 'Crest of the Stars',     // English official title
-    'overview'      => 'A space opera...',       // Description
+    'original_name' => 'Crest of the Stars',     // English official title (or kanji)
+    'overview'      => 'A space opera...',       // Description (fetched separately)
     'year'          => 1999,                     // First release year
     'genres'        => ['SciFi', 'Space'],       // Category tags
     'rating'        => 8.53,                     // AniDB rating (0-10)
     'vote_count'    => 3225,                     // Number of votes
-    'poster_url'    => 'https://api.anidb.net/images/1.jpg',
-    'fanart_url'    => null,
-    'episodes'      => 13,                       // Episode count
-    'type'          => 'TV Series',              // Anime type
+    'poster_url'    => 'https://api.anidb.net/images/1.jpg',  // null if no picname
+    'fanart_url'    => null,                     // Not provided by AniDB
+    'episodes'      => 13,                       // Episode count (null if unknown)
+    'type'          => 'tv',                      // Normalized type (tv, movie, ova, etc.)
     'anidb_id'      => 1,                        // AniDB AID
     'titles'        => ['Seikai no Monshou', 'Crest of the Stars', '星界の紋章'],
     'status'        => 'Finished',               // Finished / Currently Airing / Upcoming
-    'runtime_ticks'  => null,
-    'studio'        => null,
+    'runtime_ticks'  => null,                     // Not provided by AniDB
+    'studio'        => null,                     // AniDB uses categories instead
 ]
 ```
 

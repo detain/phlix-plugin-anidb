@@ -514,7 +514,15 @@ final class AnidbMetadataProvider implements LifecycleInterface
      *
      * @return string|null Raw response string or null on timeout/error.
      */
-    private function sendCommand(string $command): ?string
+    /**
+     * Send a command to AniDB with automatic session management.
+     *
+     * @param string $command   The command to send (without session key).
+     * @param int    $retryCount Tracks recursion depth for 506 re-auth retries (max 3).
+     *
+     * @return string|null Response string or null on timeout.
+     */
+    private function sendCommand(string $command, int $retryCount = 0): ?string
     {
         // Lazy AUTH: authenticate on first command if not yet authenticated.
         if ($this->sessionKey === null) {
@@ -538,11 +546,17 @@ final class AnidbMetadataProvider implements LifecycleInterface
             $this->lastActivityTime = time();
         }
 
-        // Handle session-expired response: re-authenticate and retry once
+        // Handle session-expired response: re-authenticate and retry with recursion guard.
         if ($result !== null && str_starts_with(trim($result), '506')) {
+            if ($retryCount >= 3) {
+                throw new \RuntimeException(
+                    'AniDB session expired: re-authentication failed after 3 retries'
+                );
+            }
             $this->authenticate();
-            $retryCommand = str_replace('&s=' . $this->sessionKey, '', $command);
-            $result = $this->sendCommand($retryCommand);
+            // Fix: token is added to $fullCommand, not $command — strip from $fullCommand.
+            $retryCommand = str_replace('&s=' . $this->sessionKey, '', $fullCommand);
+            $result = $this->sendCommand($retryCommand, $retryCount + 1);
         }
 
         return $result;

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Phlix\Anidb;
 
+use Phlix\Anidb\Dto\AnimeDto;
 use Phlix\Anidb\TitleDump\TitleDumpIndexer;
 use Phlix\Anidb\Udp\ProductionWaiter;
 use Phlix\Anidb\Udp\SocketUdpClient;
@@ -122,6 +123,14 @@ final class AnidbMetadataProvider implements LifecycleInterface
     private WaiterInterface $waiter;
 
     /**
+     * Parser seam for AniDB 230 ANIME response parsing.
+     *
+     * Defaults to {@see AnimeResponseParser}; injected in tests to verify
+     * parsing logic independently of the god-class.
+     */
+    private AnimeResponseParser $animeParser;
+
+    /**
      * Title dump index for fast offline search.
      *
      * Grouped by AID: list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}>
@@ -146,11 +155,14 @@ final class AnidbMetadataProvider implements LifecycleInterface
      * @param WaiterInterface|null $waiter Waiter seam for flood-protection delays.
      *     Defaults to {@see ProductionWaiter}. Inject a no-op/stub in tests to
      *     verify computed wait times without real wall-clock delays.
+     * @param AnimeResponseParser|null $animeParser Parser seam for 230 ANIME responses.
+     *     Defaults to {@see AnimeResponseParser}. Inject a mock in tests.
      */
     public function __construct(
         array $settings,
         ?UdpClientInterface $udpClient = null,
         ?WaiterInterface $waiter = null,
+        ?AnimeResponseParser $animeParser = null,
     ) {
         $this->settings = $settings;
         $this->cacheDir = dirname(__DIR__) . '/var/plugins/phlix-plugin-anidb';
@@ -159,6 +171,7 @@ final class AnidbMetadataProvider implements LifecycleInterface
             self::API_PORT,
         );
         $this->waiter = $waiter ?? new ProductionWaiter();
+        $this->animeParser = $animeParser ?? new AnimeResponseParser();
     }
 
     /**
@@ -911,81 +924,7 @@ final class AnidbMetadataProvider implements LifecycleInterface
      */
     private function parseAnimeResponse(string $raw): ?array
     {
-        $lines = explode("\n", trim($raw), 2);
-        if (count($lines) < 2) {
-            return null;
-        }
-
-        $fields = explode('|', $lines[1]);
-
-        // Based on amask=00f0f0f0000000 (bytes 1-4):
-        // Byte 1: aid(8)|dateflags(8)|year(8)|type(8)|related_aid_list(8)|related_aid_type(8)
-        // Byte 2: romaji(8)|kanji(8)|english(8)|other(8)|short_names(8)|synonyms(8)
-        // Byte 3: episodes(8)|highest_ep(8)|specials(8)|air_date(8)|end_date(8)|url(8)|picname(8)
-        // Byte 4: rating(8)|vote_count(8)|temp_rating(8)|temp_vote_count(8)|avg_review(8)|review_count(8)|award_list(8)|is_18+(8)
-
-        // Field order with amask=00f0f0f0000000:
-        // 0: aid, 1: dateflags, 2: year, 3: type, 4: related_aid_list, 5: related_aid_type,
-        // 6: romaji, 7: kanji, 8: english, 9: other, 10: short_names, 11: synonyms,
-        // 12: episodes, 13: highest_ep, 14: specials, 15: air_date, 16: end_date, 17: url, 18: picname,
-        // 19: rating, 20: vote_count, 21: temp_rating, 22: temp_vote_count, 23: avg_review, 24: review_count, 25: award_list, 26: is_18+
-
-        if (count($fields) < 27) {
-            return null;
-        }
-
-        // Decode escaped characters per AniDB spec:
-        // ` → '  (backtick to single quote)
-        // <br /> → space  (line break in multi-line fields)
-        // \n → space  (literal newline)
-        // NOTE: / is NOT an AniDB escape sequence — slashes in titles must be preserved.
-        //       Fields were already split on | before this decode step, so any / in
-        //       a title like "Fate/stay night" is a literal slash, not a field separator.
-        $decode = fn(string $s): string => str_replace(["`", "<br />", "\n"], ["'", ' ', ' '], $s);
-
-        // categories/tags are not included in amask=00f0f0f0000000 — set honest empty
-        $categories = [];
-
-        // Parse year: "1999-2000" or "1999"
-        $yearStr = $decode($fields[2]);
-        $year = null;
-        if ($yearStr !== '' && $yearStr !== '0000') {
-            $year = (int)explode('-', $yearStr)[0];
-            if ($year === 0) {
-                $year = null;
-            }
-        }
-
-        // AniDB rating is stored as e.g. "825" meaning 8.25
-        $rating = (int)$fields[19];
-        $ratingFloat = $rating > 0 ? $rating / 100 : null;
-
-        $anime = [
-            'aid'            => (int)$fields[0],
-            'romaji'         => $decode($fields[6]),
-            'english'        => $decode($fields[8]),
-            'kanji'          => $decode($fields[7]),
-            'other'          => $decode($fields[9]),
-            'synonyms'       => array_filter(array_map('trim', explode(',', $decode($fields[10])))),
-            'episodes'       => (int)$fields[12],
-            'specials'       => (int)$fields[14],
-            'highest_ep'     => (int)$fields[13],
-            'year'           => $yearStr,
-            'year_int'       => $year,
-            'type'           => $decode($fields[3]),
-            'categories'     => $categories,
-            'rating'         => $ratingFloat,
-            'vote_count'     => (int)$fields[20],
-            'temp_rating'    => ((int)$fields[21]) / 100,
-            'temp_vote_count'=> (int)$fields[22],
-            'start_date'     => (int)$fields[15] ?: null,
-            'end_date'       => (int)$fields[16] ?: null,
-            'url'            => 'https://anidb.net/' . $fields[0],
-            'picname'        => $decode($fields[18]),
-            'is_18plus'      => (int)$fields[26] === 1,
-        ];
-
-        return $anime;
+        return $this->animeParser->parseAnimeResponse($raw);
     }
 
     // -------------------------------------------------------------------------

@@ -665,6 +665,7 @@ final class AnidbMetadataProvider implements LifecycleInterface
         }
 
         $queryLower = mb_strtolower($query);
+        $queryLen = mb_strlen($query);
         $bestAID = null;
         $bestScore = 0;
 
@@ -673,25 +674,28 @@ final class AnidbMetadataProvider implements LifecycleInterface
             $titles = $entry['titles'];
 
             foreach ($titles as $titleEntry) {
-                $titleLower = mb_strtolower($titleEntry['title']);
+                $titleLower = $titleEntry['lower_title'] ?? mb_strtolower($titleEntry['title']);
+                $titleLen = mb_strlen($titleEntry['title']);
 
-                // Exact match (after trimming): highest score — return immediately
+                // Exact match: return immediately
                 if ($titleLower === $queryLower) {
                     return $aid;
                 }
 
-                // Prefix match: score by title length
+                // Prefix match: score = 800 - abs(len(query) - len(title))
+                // Prefer titles closer in length to the query
                 if (str_starts_with($titleLower, $queryLower)) {
-                    $score = strlen($titleEntry['title']);
+                    $score = 800 - abs($queryLen - $titleLen);
                     if ($score > $bestScore) {
                         $bestScore = $score;
                         $bestAID = $aid;
                     }
                 }
 
-                // Contains match: lower score
-                if (str_contains($titleLower, $queryLower)) {
-                    $score = strlen($titleEntry['title']) / 2;
+                // Contains match: score = 600 - abs(len(query) - len(title))
+                // Use elseif so prefix match always wins over contains when both apply
+                elseif (str_contains($titleLower, $queryLower)) {
+                    $score = 600 - abs($queryLen - $titleLen);
                     if ($score > $bestScore) {
                         $bestScore = $score;
                         $bestAID = $aid;
@@ -725,17 +729,93 @@ final class AnidbMetadataProvider implements LifecycleInterface
         if (file_exists($indexFile) && is_readable($indexFile)) {
             $data = file_get_contents($indexFile);
             if ($data !== false) {
-                /** @var list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}> $decoded */
+                /** @var mixed $decoded */
                 $decoded = json_decode($data, true);
                 if (is_array($decoded)) {
-                    $this->titleIndex = $decoded;
-                    return;
+                    $validEntries = $this->validateTitleIndexSchema($decoded);
+                    if ($validEntries !== []) {
+                        $this->titleIndex = $validEntries;
+                        return;
+                    }
+
+                    error_log(
+                        'AnidbMetadataProvider: title_index.json contained no valid entries, falling back to empty index'
+                    );
                 }
             }
         }
 
         // If no cached index, we'll rely on API lookups
         $this->titleIndex = [];
+    }
+
+    /**
+     * Validate the title index entries against the expected schema.
+     *
+     * Each entry must have:
+     *   - aid (int)
+     *   - titles (array)
+     *
+     * Each title in titles must have:
+     *   - title (string)
+     *   - type (string)
+     *   - lang (string)
+     *
+     * @param array<mixed> $entries
+     *
+     * @return list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}>
+     */
+    private function validateTitleIndexSchema(array $entries): array
+    {
+        /** @var list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}> $validEntries */
+        $validEntries = [];
+
+        foreach ($entries as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+
+            // Validate 'aid' is an int
+            if (!isset($entry['aid']) || !is_int($entry['aid'])) {
+                continue;
+            }
+
+            // Validate 'titles' is an array
+            if (!isset($entry['titles']) || !is_array($entry['titles'])) {
+                continue;
+            }
+
+            /** @var list<array{title: string, type: string, lang: string}> $validatedTitles */
+            $validatedTitles = [];
+
+            foreach ($entry['titles'] as $title) {
+                if (!is_array($title)) {
+                    continue 2;
+                }
+
+                if (
+                    !isset($title['title'], $title['type'], $title['lang'])
+                    || !is_string($title['title'])
+                    || !is_string($title['type'])
+                    || !is_string($title['lang'])
+                ) {
+                    continue 2;
+                }
+
+                $validatedTitles[] = [
+                    'title' => $title['title'],
+                    'type' => $title['type'],
+                    'lang' => $title['lang'],
+                ];
+            }
+
+            $validEntries[] = [
+                'aid' => $entry['aid'],
+                'titles' => $validatedTitles,
+            ];
+        }
+
+        return $validEntries;
     }
 
     /**
@@ -854,10 +934,17 @@ final class AnidbMetadataProvider implements LifecycleInterface
             return null;
         }
 
-        // Decode escaped characters: ` → '  / → |  \n → newline
-        $decode = fn(string $s): string => str_replace(["`", '/', "\n"], ["'", '|', ' '], $s);
+        // Decode escaped characters per AniDB spec:
+        // ` → '  (backtick to single quote)
+        // <br /> → space  (line break in multi-line fields)
+        // \n → space  (literal newline)
+        // NOTE: / is NOT an AniDB escape sequence — slashes in titles must be preserved.
+        //       Fields were already split on | before this decode step, so any / in
+        //       a title like "Fate/stay night" is a literal slash, not a field separator.
+        $decode = fn(string $s): string => str_replace(["`", "<br />", "\n"], ["'", ' ', ' '], $s);
 
-        $categories = array_filter(array_map('trim', explode(',', $decode($fields[3]))));
+        // categories/tags are not included in amask=00f0f0f0000000 — set honest empty
+        $categories = [];
 
         // Parse year: "1999-2000" or "1999"
         $yearStr = $decode($fields[2]);

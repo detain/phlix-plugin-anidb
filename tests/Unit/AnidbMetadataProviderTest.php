@@ -389,7 +389,67 @@ final class AnidbMetadataProviderTest extends TestCase
         $this->assertSame(1999, $result['year_int']);
         $this->assertSame(8.53, $result['rating']); // 853/100 = 8.53
         $this->assertSame(['Seikai'], $result['synonyms']);
-        $this->assertSame(['TV Series'], $result['categories']);
+        // categories is not included in amask=00f0f0f0000000 — returns honest empty
+        $this->assertSame([], $result['categories']);
+    }
+
+    /**
+     * Regression test for B7: slashes in anime titles must be preserved.
+     * The old buggy decode() did str_replace(['`', '/', "\n"], ["'", '|', ' '], $s)
+     * which blanket-replaced EVERY '/' with '|' — mangling "Fate/stay night" into
+     * "Fate|stay night". The fix splits fields on '|' BEFORE any unescaping,
+     * and only unescapes documented AniDB escapes: backtick→', <br />→space, \n→space.
+     */
+    public function test_parses_anime_response_preserves_slash_in_title(): void
+    {
+        $provider = new AnidbMetadataProvider([
+            'username' => 'testuser',
+            'api_key' => 'testkey',
+            'use_title_dump' => false,
+            'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
+        ]);
+
+        $reflection = new \ReflectionClass($provider);
+        $method = $reflection->getMethod('parseAnimeResponse');
+        $method->setAccessible(true);
+
+        // Build a 230 response with romaji "Fate/stay night" (contains a slash)
+        $rawResponse = "230 ANIME\n" . implode('|', [
+            '1',       // 0: aid
+            '0',       // 1: dateflags
+            '2000-2000', // 2: year
+            'TV Series', // 3: type
+            '',        // 4: related_aid_list
+            '',        // 5: related_aid_type
+            'Fate/stay night', // 6: romaji — CONTAINS SLASH, must be preserved
+            'フェイト/stay night', // 7: kanji
+            'Fate/stay night', // 8: english
+            '',        // 9: other
+            '',        // 10: short_names
+            '',        // 11: synonyms
+            '24',      // 12: episodes
+            '24',      // 13: highest_ep
+            '0',       // 14: specials
+            '968784000', // 15: air_date
+            '0',       // 16: end_date
+            'https://anidb.net/5', // 17: url
+            '5.jpg',   // 18: picname
+            '850',     // 19: rating
+            '5000',    // 20: vote_count
+            '0',       // 21: temp_rating
+            '0',       // 22: temp_vote_count
+            '0',       // 23: avg_review
+            '0',       // 24: review_count
+            '',        // 25: award_list
+            '0',       // 26: is_18plus
+        ]);
+
+        $result = $method->invoke($provider, $rawResponse);
+
+        $this->assertNotNull($result);
+        // The romaji field MUST preserve the slash — not turn it into "|"
+        $this->assertSame('Fate/stay night', $result['romaji']);
+        $this->assertSame('Fate/stay night', $result['english']);
     }
 
     /**
@@ -558,5 +618,169 @@ final class AnidbMetadataProviderTest extends TestCase
         // This is the critical assertion that the $command→$fullCommand fix enables.
         $this->assertStringContainsString('s=NEW_SESSIONKEY', $sentData[2]);
         $this->assertStringContainsString('TESTCMD', $sentData[2]);
+    }
+
+    /**
+     * B4: searchTitleDump() scoring correctness tests.
+     *
+     * Tests that scoring follows: exact > exact-prefix > contains,
+     * and within same tier prefers shorter/closer-length titles.
+     */
+    public function test_searchTitleDump_exact_match_returns_immediately(): void
+    {
+        $provider = new AnidbMetadataProvider([
+            'username' => 'testuser',
+            'api_key' => 'testkey',
+            'use_title_dump' => true,
+            'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
+        ]);
+
+        // Inject a title index with known entries via Reflection.
+        $index = [
+            ['aid' => 1, 'titles' => [
+                ['title' => 'Fate/stay night', 'lower_title' => 'fate/stay night', 'type' => 'main', 'lang' => 'en'],
+            ]],
+            ['aid' => 2, 'titles' => [
+                ['title' => 'Fate/Zero', 'lower_title' => 'fate/zero', 'type' => 'main', 'lang' => 'en'],
+            ]],
+        ];
+
+        $reflection = new \ReflectionClass($provider);
+        $titleIndexProp = $reflection->getProperty('titleIndex');
+        $titleIndexProp->setAccessible(true);
+        $titleIndexProp->setValue($provider, $index);
+
+        $searchMethod = $reflection->getMethod('searchTitleDump');
+        $searchMethod->setAccessible(true);
+
+        // Exact match for "Fate/stay night" should return AID 1 immediately.
+        $result = $searchMethod->invoke($provider, 'Fate/stay night');
+        $this->assertSame(1, $result);
+    }
+
+    public function test_searchTitleDump_exact_prefix_wins_over_contains(): void
+    {
+        $provider = new AnidbMetadataProvider([
+            'username' => 'testuser',
+            'api_key' => 'testkey',
+            'use_title_dump' => true,
+            'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
+        ]);
+
+        // AID 1: "Fate/stay night" - "stay" is a contains match
+        // AID 2: "Fate/Zero" - "Fate" is an exact-prefix match
+        $index = [
+            ['aid' => 1, 'titles' => [
+                ['title' => 'Fate/stay night', 'lower_title' => 'fate/stay night', 'type' => 'main', 'lang' => 'en'],
+            ]],
+            ['aid' => 2, 'titles' => [
+                ['title' => 'Fate/Zero', 'lower_title' => 'fate/zero', 'type' => 'main', 'lang' => 'en'],
+            ]],
+        ];
+
+        $reflection = new \ReflectionClass($provider);
+        $titleIndexProp = $reflection->getProperty('titleIndex');
+        $titleIndexProp->setAccessible(true);
+        $titleIndexProp->setValue($provider, $index);
+
+        $searchMethod = $reflection->getMethod('searchTitleDump');
+        $searchMethod->setAccessible(true);
+
+        // Searching for "Fate" should return AID 2 (exact prefix) not AID 1 (contains).
+        // "Fate/Zero" starts with "Fate" (prefix match, score 800 - abs(4-9) = 795)
+        // "Fate/stay night" contains "Fate" (contains match, score 600 - abs(4-16) = 588)
+        // 795 > 588, so AID 2 should win.
+        $result = $searchMethod->invoke($provider, 'Fate');
+        $this->assertSame(2, $result);
+    }
+
+    public function test_searchTitleDump_within_same_tier_prefers_shorter_title(): void
+    {
+        $provider = new AnidbMetadataProvider([
+            'username' => 'testuser',
+            'api_key' => 'testkey',
+            'use_title_dump' => true,
+            'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
+        ]);
+
+        // Both entries have "Fate" as a prefix match.
+        // AID 1: "Fate/stay night" (16 chars) - prefix score: 800 - abs(4-16) = 788
+        // AID 2: "Fate/Zero" (9 chars) - prefix score: 800 - abs(4-9) = 795
+        // AID 2 should win because it's closer in length to the query "Fate".
+        $index = [
+            ['aid' => 1, 'titles' => [
+                ['title' => 'Fate/stay night', 'lower_title' => 'fate/stay night', 'type' => 'main', 'lang' => 'en'],
+            ]],
+            ['aid' => 2, 'titles' => [
+                ['title' => 'Fate/Zero', 'lower_title' => 'fate/zero', 'type' => 'main', 'lang' => 'en'],
+            ]],
+        ];
+
+        $reflection = new \ReflectionClass($provider);
+        $titleIndexProp = $reflection->getProperty('titleIndex');
+        $titleIndexProp->setAccessible(true);
+        $titleIndexProp->setValue($provider, $index);
+
+        $searchMethod = $reflection->getMethod('searchTitleDump');
+        $searchMethod->setAccessible(true);
+
+        $result = $searchMethod->invoke($provider, 'Fate');
+        $this->assertSame(2, $result);
+    }
+
+    public function test_searchTitleDump_returns_null_when_no_match(): void
+    {
+        $provider = new AnidbMetadataProvider([
+            'username' => 'testuser',
+            'api_key' => 'testkey',
+            'use_title_dump' => true,
+            'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
+        ]);
+
+        $index = [
+            ['aid' => 1, 'titles' => [
+                ['title' => 'Fate/stay night', 'lower_title' => 'fate/stay night', 'type' => 'main', 'lang' => 'en'],
+            ]],
+        ];
+
+        $reflection = new \ReflectionClass($provider);
+        $titleIndexProp = $reflection->getProperty('titleIndex');
+        $titleIndexProp->setAccessible(true);
+        $titleIndexProp->setValue($provider, $index);
+
+        $searchMethod = $reflection->getMethod('searchTitleDump');
+        $searchMethod->setAccessible(true);
+
+        $result = $searchMethod->invoke($provider, 'NoSuchTitle');
+        $this->assertNull($result);
+    }
+
+    public function test_searchTitleDump_uses_lower_title_field_when_available(): void
+    {
+        $provider = new AnidbMetadataProvider([
+            'username' => 'testuser',
+            'api_key' => 'testkey',
+            'use_title_dump' => true,
+            'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
+        ]);
+
+        // Title entry WITHOUT lower_title (should fall back to mb_strtolower)
+        $index = [
+            ['aid' => 1, 'titles' => [
+                ['title' => 'FATE/STAY NIGHT', 'type' => 'main', 'lang' => 'en'],
+            ]],
+        ];
+
+        $reflection = new \ReflectionClass($provider);
+        $titleIndexProp = $reflection->getProperty('titleIndex');
+        $titleIndexProp->setAccessible(true);
+        $titleIndexProp->setValue($provider, $index);
+
+        $searchMethod = $reflection->getMethod('searchTitleDump');
+        $searchMethod->setAccessible(true);
+
+        // Search with lowercase query should find the uppercase title via fallback mb_strtolower.
+        $result = $searchMethod->invoke($provider, 'fate/stay night');
+        $this->assertSame(1, $result);
     }
 }

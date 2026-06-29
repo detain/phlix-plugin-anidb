@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Phlix\Anidb;
 
+use Phlix\Anidb\Udp\ProductionWaiter;
 use Phlix\Anidb\Udp\SocketUdpClient;
 use Phlix\Anidb\Udp\UdpClientInterface;
+use Phlix\Anidb\Udp\WaiterInterface;
 use Phlix\Shared\Plugin\LifecycleInterface;
 use Psr\Container\ContainerInterface;
 
@@ -109,6 +111,16 @@ final class AnidbMetadataProvider implements LifecycleInterface
     private UdpClientInterface $udpClient;
 
     /**
+     * Waiter seam for flood-protection delays.
+     *
+     * Allows {@see enforceFloodProtection()} to yield to the event loop instead
+     * of blocking with `usleep` when a non-blocking implementation (e.g.
+     * Workerman\Timer) is available in the host. Defaults to {@see ProductionWaiter}
+     * for backward compatibility; inject a no-op/stub in tests.
+     */
+    private WaiterInterface $waiter;
+
+    /**
      * Title dump index for fast offline search.
      *
      * @var array<string, array{aid: int, title: string, type: string}>|null
@@ -128,35 +140,40 @@ final class AnidbMetadataProvider implements LifecycleInterface
      *     {@see SocketUdpClient} bound to the AniDB endpoint, preserving the
      *     original inline-socket behavior. Inject a fake in tests to drive
      *     AUTH/command/retry logic without the network.
+     * @param WaiterInterface|null $waiter Waiter seam for flood-protection delays.
+     *     Defaults to {@see ProductionWaiter}. Inject a no-op/stub in tests to
+     *     verify computed wait times without real wall-clock delays.
      */
-    public function __construct(array $settings, ?UdpClientInterface $udpClient = null)
-    {
+    public function __construct(
+        array $settings,
+        ?UdpClientInterface $udpClient = null,
+        ?WaiterInterface $waiter = null,
+    ) {
         $this->settings = $settings;
         $this->cacheDir = dirname(__DIR__) . '/var/plugins/phlix-plugin-anidb';
         $this->udpClient = $udpClient ?? new SocketUdpClient(
             self::API_HOST,
             self::API_PORT,
         );
+        $this->waiter = $waiter ?? new ProductionWaiter();
     }
 
     /**
      * Called by the loader once when the plugin is enabled.
      *
-     * Opens the UDP socket, authenticates to AniDB, and loads the title dump.
-     * Keep onEnable() cheap — do heavy work (title dump parsing) lazily.
+     * Opens the UDP socket and registers with the host MetadataManager.
+     * AUTH is deferred to first-use (lazy) so onEnable() never blocks the
+     * resident worker on network I/O. The title dump is also lazy-loaded.
      *
      * @param ContainerInterface $container Host PSR-11 container.
      *
      * @return void
-     *
-     * @throws \RuntimeException If AUTH fails (bad credentials, banned, etc.)
      */
     public function onEnable(ContainerInterface $container): void
     {
         $this->container = $container;
 
         $this->openSocket();
-        $this->authenticate();
 
         // Lazy-load title index on first lookup if enabled
         if ($this->settings['use_title_dump']) {
@@ -375,6 +392,11 @@ final class AnidbMetadataProvider implements LifecycleInterface
     /**
      * Authenticate to AniDB via AUTH command.
      *
+     * AUTH is special: it has no session key (the server assigns one in the
+     * response), so we bypass sendCommand() which would incorrectly append
+     * '&s=' to a null sessionKey. AUTH also bypasses flood protection since
+     * it's the first packet sent; the server enforces the rate limit.
+     *
      * @return void
      *
      * @throws \RuntimeException If AUTH fails.
@@ -387,7 +409,10 @@ final class AnidbMetadataProvider implements LifecycleInterface
             urlencode($this->settings['api_key'])
         );
 
-        $response = $this->sendCommand($cmd);
+        // Send AUTH directly — bypass sendCommand() which appends '&s='.
+        // The AUTH response contains the session key; subsequent commands
+        // will use sendCommand() which appends '&s=' correctly.
+        $response = $this->udpSend($cmd);
 
         if ($response === null) {
             throw new \RuntimeException('AniDB AUTH: no response (timeout or network failure)');
@@ -481,18 +506,23 @@ final class AnidbMetadataProvider implements LifecycleInterface
     /**
      * Send a command to AniDB with flood protection and session key.
      *
+     * AUTH is performed lazily on first command when sessionKey is null,
+     * keeping onEnable() non-blocking. The first command after a session
+     * expiry (506) will also trigger re-auth.
+     *
      * @param string $command Full command string (without session key).
      *
      * @return string|null Raw response string or null on timeout/error.
      */
     private function sendCommand(string $command): ?string
     {
-        // Attach session key if we have one
-        if ($this->sessionKey !== null) {
-            $fullCommand = $command . '&s=' . $this->sessionKey;
-        } else {
-            $fullCommand = $command;
+        // Lazy AUTH: authenticate on first command if not yet authenticated.
+        if ($this->sessionKey === null) {
+            $this->authenticate();
         }
+
+        // Attach session key
+        $fullCommand = $command . '&s=' . $this->sessionKey;
 
         // Flood protection: enforce minimum interval between sends
         $this->enforceFloodProtection();
@@ -541,6 +571,10 @@ final class AnidbMetadataProvider implements LifecycleInterface
     /**
      * Enforce the 4-second minimum between UDP commands.
      *
+     * Uses the injected {@see WaiterInterface} instead of blocking `usleep()`,
+     * allowing non-blocking implementations (e.g. Workerman\Timer) to yield
+     * to the event loop rather than parking the resident worker.
+     *
      * @return void
      */
     private function enforceFloodProtection(): void
@@ -548,8 +582,9 @@ final class AnidbMetadataProvider implements LifecycleInterface
         $now = microtime(true);
         $elapsed = $now - $this->lastSendTimestamp;
 
-        if ($elapsed < self::FLOOD_PROTECTION_INTERVAL_SEC) {
-            usleep((int)((self::FLOOD_PROTECTION_INTERVAL_SEC - $elapsed) * 1_000_000));
+        $waitTime = self::FLOOD_PROTECTION_INTERVAL_SEC - $elapsed;
+        if ($waitTime > 0) {
+            $this->waiter->wait($waitTime);
         }
 
         $this->lastSendTimestamp = microtime(true);

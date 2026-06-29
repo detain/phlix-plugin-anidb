@@ -7,19 +7,19 @@ namespace Phlix\Anidb\Udp;
 /**
  * Default, production {@see UdpClientInterface} implementation.
  *
- * Wraps the blocking `socket_*` lifecycle (create / bind / sendto / recvfrom /
- * close) that previously lived inline on {@see \Phlix\Anidb\AnidbMetadataProvider}
- * as `openSocket()` / `udpSend()` / `closeSocket()`. The behavior is preserved
- * byte-for-byte from the original methods:
+ * Wraps the non-blocking `socket_*` lifecycle (create / bind / sendto / select +
+ * recvfrom / close). Compared to the original inline implementation:
  *
  * - AF_INET / SOCK_DGRAM / SOL_UDP socket, SO_REUSEADDR set;
  * - bound to a fixed local port above 1024 to avoid AniDB's multi-port ban;
- * - 10s send/receive timeouts;
- * - {@see send()} sendto's the datagram then recvfrom's up to 1400 bytes,
- *   returning the trimmed payload (or null on a failed send/recv);
+ * - 10s send/receive timeouts via `socket_select()` (non-blocking poll) so the
+ *   calling worker is never parked on `socket_recvfrom`;
+ * - {@see send()} sendto's the datagram then uses `socket_select()` to wait
+ *   for data availability before reading up to 1400 bytes, returning the trimmed
+ *   payload (or null on timeout);
  * - {@see close()} closes the socket if open.
  *
- * NO flood protection, async, or origin validation is performed here — those are
+ * NO flood protection or origin validation is performed here — those are
  * provider/later-step concerns. {@see send()} additionally captures the reply's
  * source host/port for the future origin-validation step.
  *
@@ -107,9 +107,9 @@ final class SocketUdpClient implements UdpClientInterface
     /**
      * {@inheritDoc}
      *
-     * Preserves the original udpSend() behavior: sendto the datagram then
-     * recvfrom up to 1400 bytes, returning the trimmed payload or null on a
-     * failed send/recv. Additionally records the reply's source host/port.
+     * Uses non-blocking I/O via `socket_select()` to wait for data availability
+     * before reading. This replaces the original blocking `socket_recvfrom` call
+     * and ensures the calling worker is never parked for the full 10s timeout.
      */
     public function send(string $data): ?string
     {
@@ -127,6 +127,25 @@ final class SocketUdpClient implements UdpClientInterface
         );
 
         if ($bytesSent === false) {
+            return null;
+        }
+
+        // Use socket_select() for non-blocking wait on data availability.
+        // This replaces the blocking socket_recvfrom that previously parked
+        // the worker for up to 10 seconds.
+        $read = [$this->socket];
+        $write = null;
+        $except = null;
+        $timeoutSec = 10;
+
+        $selected = @socket_select($read, $write, $except, $timeoutSec);
+
+        if ($selected === false) {
+            return null;
+        }
+
+        if ($selected === 0) {
+            // Timeout — no data available within the 10s window
             return null;
         }
 

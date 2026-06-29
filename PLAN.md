@@ -10,32 +10,41 @@ This plan covers implementing `phlix-plugin-anidb`, a metadata-provider plugin f
 
 ## 1. Architecture
 
+> **Note:** The architecture below reflects the original implementation plan.
+> The actual file layout may differ from what was originally planned.
+
 ```
 phlix-plugin-anidb/
 ├── composer.json
 ├── plugin.json
 ├── src/
-│   ├── AnidbMetadataProvider.php   # Implements LifecycleInterface + lookup()
-│   ├── Api/
-│   │   ├── UdpClient.php            # Raw UDP socket client with flood protection
-│   │   ├── Session.php              # Handles AUTH, keepalive, LOGOUT
-│   │   └── Commands/
-│   │       ├── AnimeCommand.php    # ANIME command wrapper
-│   │       ├── EpisodeCommand.php   # EPISODE command wrapper
-│   │       └── FileCommand.php      # FILE command wrapper (for future use)
+│   ├── AnidbMetadataProvider.php      # Implements LifecycleInterface + lookup()
+│   ├── AnidbMetadataProviderAdapter.php  # Adapter for MetadataManager interface
+│   ├── Udp/
+│   │   ├── UdpClient.php              # High-level UDP session client (AUTH, flood protection, 506 retry)
+│   │   ├── UdpClientInterface.php     # Transport seam interface
+│   │   ├── SocketUdpClient.php        # Raw UDP socket client (socket_* based)
+│   │   ├── ProductionWaiter.php       # Blocking waiter (usleep-based)
+│   │   └── WaiterInterface.php       # Waiter seam for non-blocking flood protection
 │   ├── Parser/
-│   │   ├── AnimeParser.php          # Parses ANIME command responses
-│   │   ├── EpisodeParser.php        # Parses EPISODE command responses
-│   │   └── TitleDumpParser.php      # Parses anime-titles.dat.gz
-│   ├── TitleIndex.php               # In-memory index of title dump for fast search
+│   │   ├── AnimeResponseParser.php    # Parses ANIME 230 responses
+│   │   └── FilenameTitleExtractor.php # Extracts anime title from file paths
+│   ├── TitleDump/
+│   │   ├── TitleDumpManager.php       # Downloads and manages title dump lifecycle
+│   │   └── TitleDumpIndexer.php       # Builds and queries the title index
 │   └── Dto/
-│       └── AnidbAnime.php           # Internal DTO matching AniDB anime shape
+│       └── AnimeDto.php               # Internal DTO for anime data
 └── tests/
     └── Unit/
         ├── AnidbMetadataProviderTest.php
-        ├── UdpClientTest.php
-        ├── AnimeParserTest.php
-        └── TitleDumpParserTest.php
+        ├── AnidbUdpSeamTest.php
+        ├── AnidbUdpRetryAndOriginTest.php
+        ├── AnidbMetadataProviderAdapterTest.php
+        ├── FilenameTitleExtractorTest.php
+        ├── AnimeDtoTest.php
+        ├── TitleIndexSchemaValidationTest.php
+        └── TitleDump/
+            └── TitleDumpIndexerTest.php
 ```
 
 ### Plugin type: `metadata-provider`

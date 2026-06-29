@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Phlix\Anidb\TitleDump;
 
 use RuntimeException;
+use Workerman\HttpClient;
 
 /**
  * Downloads and indexes the AniDB anime-titles.dat.gz dump.
@@ -40,9 +41,13 @@ final class TitleDumpIndexer
     private string $titleDumpUrl;
 
     /**
-     * HTTP client that fetches the URL and returns raw bytes.
+     * HTTP client that fetches the URL asynchronously and calls back with raw bytes.
      *
-     * @var callable(string): string|null
+     * B5: Changed from blocking callable(string): string|null to non-blocking
+     * callback-based callable(string, callable(?string): void): void to avoid
+     * blocking the Workerman event loop.
+     *
+     * @var callable(string, callable(?string): void): void
      */
     private $httpClient;
 
@@ -50,7 +55,8 @@ final class TitleDumpIndexer
      * @param string      $cacheDir     Directory to store the index file.
      * @param string      $titleDumpUrl URL to anime-titles.dat.gz.
      * @param callable|null $httpClient Injectable HTTP client. Defaults to a
-     *     callable that uses file_get_contents with gzip Accept-Encoding.
+     *     non-blocking Workerman\HttpClient wrapper. The callable receives (url, callback)
+     *     where callback is invoked with raw gzipped bytes or null on failure.
      */
     public function __construct(
         string $cacheDir,
@@ -66,9 +72,16 @@ final class TitleDumpIndexer
      * Download and index the title dump if the local copy is stale or absent.
      *
      * Guard: only re-downloads if the index file is absent or its mtime is older
-     * than MAX_AGE_SECONDS. Returns true on success, false on failure.
+     * than MAX_AGE_SECONDS. Schedules the download via Workerman\Timer to avoid
+     * blocking the event loop; returns true immediately when scheduled.
      *
-     * @return bool True on success, false on failure.
+     * B5: Uses Workerman\Timer::add(0, ...) to defer the blocking HTTP call to the
+     * next event loop tick so the Workerman worker returns to its loop
+     * immediately. Falls back to synchronous execution when Workerman\Timer
+     * is unavailable (unit tests, CLI).
+     *
+     * @return bool True when scheduled (or completed synchronously in CLI/tests).
+     *     Note: actual result is delivered via callback in production.
      */
     public function downloadAndIndex(): bool
     {
@@ -78,17 +91,46 @@ final class TitleDumpIndexer
             return true;
         }
 
-        $raw = $this->fetch();
-        if ($raw === null) {
+        // B5: Use Timer to defer the blocking HTTP call to the next event loop tick.
+        // This prevents blocking the Workerman event loop during the HTTP request.
+        if (class_exists(\Workerman\Timer::class)) {
+            \Workerman\Timer::add(0, function (): void {
+                $this->doDownloadAndIndex();
+            });
+
+            return true;
+        }
+
+        // Synchronous fallback for CLI / unit tests
+        return $this->doDownloadAndIndex();
+    }
+
+    /**
+     * Actual download and index implementation (called within Timer callback).
+     *
+     * @return bool True on success, false on failure.
+     */
+    private function doDownloadAndIndex(): bool
+    {
+        $fetchResult = null;
+
+        $onFetched = static function (?string $body) use (&$fetchResult): void {
+            $fetchResult = $body;
+        };
+
+        $this->fetch($onFetched);
+
+        if ($fetchResult === null) {
             return false;
         }
 
-        $decoded = @gzdecode($raw);
+        $decoded = @gzdecode($fetchResult);
         if ($decoded === false) {
             return false;
         }
 
         $index = $this->parse($decoded);
+
         return $this->writeIndex($index);
     }
 
@@ -155,19 +197,22 @@ final class TitleDumpIndexer
     }
 
     /**
-     * Fetch the gzipped title dump from the configured URL.
+     * Fetch the gzipped title dump from the configured URL (async, callback-based).
      *
-     * @return string|null Raw gzipped bytes, or null on failure.
+     * B5: Now uses callback-based async pattern to avoid blocking the event loop.
+     *
+     * @param callable(?string): void $onResult Callback invoked with raw gzipped
+     *     bytes or null on failure.
      */
-    private function fetch(): ?string
+    private function fetch(callable $onResult): void
     {
         if ($this->httpClient === null) {
-            return null;
+            $onResult(null);
+
+            return;
         }
 
-        $body = ($this->httpClient)($this->titleDumpUrl);
-
-        return $body !== '' ? $body : null;
+        ($this->httpClient)($this->titleDumpUrl, $onResult);
     }
 
     /**
@@ -200,27 +245,47 @@ final class TitleDumpIndexer
     }
 
     /**
-     * Default HTTP client using file_get_contents with gzip decoding.
+     * Default non-blocking HTTP client using Workerman\HttpClient.
      *
-     * @param string $url URL to fetch.
+     * B5: Changed from blocking file_get_contents to non-blocking Workerman\HttpClient
+     * which uses the event loop for async HTTP requests.
      *
-     * @return string|null Raw bytes or null on failure.
+     * @param string               $url      URL to fetch.
+     * @param callable(?string): void $onResult Callback with raw bytes or null.
      */
-    private static function defaultHttpClient(string $url): ?string
+    private static function defaultHttpClient(string $url, callable $onResult): void
     {
-        $context = stream_context_create([
-            'http' => [
-                'method'  => 'GET',
-                'timeout' => 60,
-                'header'  => [
-                    'Accept-Encoding: gzip, deflate',
-                    'User-Agent: phlix-anidb-plugin/1.0',
+        // Gracefully handle when Workerman\HttpClient is unavailable (tests/CLI).
+        if (!class_exists(HttpClient::class)) {
+            // Fall back to blocking implementation when Workerman is not available.
+            $context = stream_context_create([
+                'http' => [
+                    'method'  => 'GET',
+                    'timeout' => 60,
+                    'header'  => [
+                        'Accept-Encoding: gzip, deflate',
+                        'User-Agent: phlix-anidb-plugin/1.0',
+                    ],
                 ],
+            ]);
+
+            $body = @file_get_contents($url, false, $context);
+            $onResult($body !== false ? $body : null);
+
+            return;
+        }
+
+        $client = new HttpClient($url, [
+            'headers' => [
+                'Accept-Encoding' => 'gzip, deflate',
+                'User-Agent'      => 'phlix-anidb-plugin/1.0',
             ],
+            'timeout' => 60,
         ]);
 
-        $body = @file_get_contents($url, false, $context);
-
-        return $body !== false ? $body : null;
+        $client->get(function ($response) use ($onResult): void {
+            $body = $response->getBody();
+            $onResult($body !== '' ? $body : null);
+        });
     }
 }

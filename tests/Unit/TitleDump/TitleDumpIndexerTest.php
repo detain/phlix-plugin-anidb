@@ -236,9 +236,10 @@ DAT;
 
         $httpCallCount = 0;
 
-        $httpClient = static function (string $url) use ($gzData, &$httpCallCount): string|null {
+        // B5: HTTP client now uses callback-based interface (string $url, callable $onResult): void
+        $httpClient = static function (string $url, callable $onResult) use ($gzData, &$httpCallCount): void {
             ++$httpCallCount;
-            return $gzData;
+            $onResult($gzData);
         };
 
         try {
@@ -274,9 +275,10 @@ DAT;
 
         $httpCallCount = 0;
 
-        $httpClient = static function (string $url) use ($gzData, &$httpCallCount): string|null {
+        // B5: HTTP client now uses callback-based interface (string $url, callable $onResult): void
+        $httpClient = static function (string $url, callable $onResult) use ($gzData, &$httpCallCount): void {
             ++$httpCallCount;
-            return $gzData;
+            $onResult($gzData);
         };
 
         try {
@@ -307,9 +309,10 @@ DAT;
         $this->assertNotNull($gzData2);
 
         $callCount = 0;
-        $httpClient = static function (string $url) use ($gzData1, $gzData2, &$callCount): string|null {
+        // B5: HTTP client now uses callback-based interface (string $url, callable $onResult): void
+        $httpClient = static function (string $url, callable $onResult) use ($gzData1, $gzData2, &$callCount): void {
             ++$callCount;
-            return $callCount === 1 ? $gzData1 : $gzData2;
+            $onResult($callCount === 1 ? $gzData1 : $gzData2);
         };
 
         try {
@@ -342,7 +345,10 @@ DAT;
         $tmpDir = sys_get_temp_dir() . '/title_dump_test_' . uniqid();
         mkdir($tmpDir, 0755, true);
 
-        $httpClient = static fn(string $url): string|null => null;
+        // B5: HTTP client now uses callback-based interface, invoke callback with null on failure
+        $httpClient = static function (string $url, callable $onResult): void {
+            $onResult(null);
+        };
 
         try {
             $indexer = new TitleDumpIndexer($tmpDir, 'http://example.com/anime-titles.dat.gz', $httpClient);
@@ -360,8 +366,10 @@ DAT;
         $tmpDir = sys_get_temp_dir() . '/title_dump_test_' . uniqid();
         mkdir($tmpDir, 0755, true);
 
-        // Return raw non-gzip data
-        $httpClient = static fn(string $url): string|null => 'not gzipped data';
+        // B5: HTTP client returns non-gzip data, which will fail gzdecode
+        $httpClient = static function (string $url, callable $onResult): void {
+            $onResult('not gzipped data');
+        };
 
         try {
             $indexer = new TitleDumpIndexer($tmpDir, 'http://example.com/anime-titles.dat.gz', $httpClient);

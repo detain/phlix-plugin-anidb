@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Phlix\Anidb\Tests\Unit;
 
 use Phlix\Anidb\AnidbMetadataProvider;
+use Phlix\Shared\Metadata\MetadataSourceInterface;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -333,5 +334,35 @@ final class AnidbMetadataProviderTest extends TestCase
         // The romaji field MUST preserve the slash — not turn it into "|"
         $this->assertSame('Fate/stay night', $result['romaji']);
         $this->assertSame('Fate/stay night', $result['english']);
+    }
+
+    public function test_implements_shared_metadata_source_contract(): void
+    {
+        $provider = new AnidbMetadataProvider([
+            'username' => 'testuser',
+            'api_key' => 'testkey',
+            'use_title_dump' => false,
+            'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
+        ]);
+
+        $this->assertInstanceOf(MetadataSourceInterface::class, $provider);
+        $this->assertSame('anidb', $provider->sourceName());
+        $this->assertSame(['anime', 'series'], $provider->supportedMediaTypes());
+    }
+
+    public function test_metadata_source_lookups_return_empty_for_invalid_external_id(): void
+    {
+        $provider = new AnidbMetadataProvider([
+            'username' => 'testuser',
+            'api_key' => 'testkey',
+            'use_title_dump' => false,
+            'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
+        ]);
+
+        // Invalid external ids never touch the network — they short-circuit
+        // through the adapter's parseAid() guard to an empty result.
+        $this->assertSame([], $provider->getDetails('not-an-aid'));
+        $this->assertSame([], $provider->getDetails('0'));
+        $this->assertSame([], $provider->getImages('not-an-aid'));
     }
 }

@@ -13,6 +13,7 @@ use Phlix\Anidb\Udp\SocketUdpClient;
 use Phlix\Anidb\Udp\UdpClient;
 use Phlix\Anidb\Udp\UdpClientInterface;
 use Phlix\Anidb\Udp\WaiterInterface;
+use Phlix\Shared\Metadata\MetadataSourceInterface;
 use Phlix\Shared\Plugin\LifecycleInterface;
 use Psr\Container\ContainerInterface;
 
@@ -46,7 +47,7 @@ use Psr\Container\ContainerInterface;
  * @package Phlix\Anidb
  * @since 0.1.0
  */
-final class AnidbMetadataProvider implements LifecycleInterface
+final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceInterface
 {
     /**
      * Default anime data mask — bytes 1-4 (basic info + names + episodes + ratings).
@@ -130,6 +131,14 @@ final class AnidbMetadataProvider implements LifecycleInterface
      * Path to cached title dump file.
      */
     private string $cacheDir;
+
+    /**
+     * Lazily-built host-contract adapter, reused by both the legacy
+     * {@see registerWithMetadataManager()} path and the
+     * {@see MetadataSourceInterface} triad below so a single object owns the
+     * external-id ⇄ AID translation.
+     */
+    private ?AnidbMetadataProviderAdapter $adapter = null;
 
     /**
      * @param array{username: string, api_key: string, use_title_dump: bool, title_dump_url: string} $settings
@@ -242,15 +251,122 @@ final class AnidbMetadataProvider implements LifecycleInterface
             return;
         }
 
-        $adapter = new AnidbMetadataProviderAdapter($this);
-
         // type list mirrors how series/anime items flow through MetadataManager's
         // providersByType map; AniDB is anime-first but also a 'series' source.
         $manager->registerProvider(
             AnidbMetadataProviderAdapter::SOURCE_NAME,
-            $adapter,
-            ['anime', 'series'],
+            $this->adapter(),
+            $this->supportedMediaTypes(),
         );
+    }
+
+    /**
+     * Lazily build (and cache) the host-contract adapter that bridges this
+     * provider's filename/AID lookup to the external-id triad.
+     *
+     * @return AnidbMetadataProviderAdapter
+     */
+    private function adapter(): AnidbMetadataProviderAdapter
+    {
+        return $this->adapter ??= new AnidbMetadataProviderAdapter($this);
+    }
+
+    // -------------------------------------------------------------------------
+    // MetadataSourceInterface (Phlix\Shared\Metadata) — the first-class typed
+    // contract the host SourceRegistry registers on plugin-enable and
+    // deregisters on plugin-disable (Step 3.5). The triad delegates to the
+    // existing adapter so there is a single source of truth for the
+    // external-id ⇄ AID lookup.
+    // -------------------------------------------------------------------------
+
+    /**
+     * Canonical source name — matches the host anime priority-map entry
+     * `['anidb', 'myanimelist', 'tvdb', 'fanart', 'local']`.
+     *
+     * @return non-empty-string Always `anidb`.
+     */
+    public function sourceName(): string
+    {
+        return AnidbMetadataProviderAdapter::SOURCE_NAME;
+    }
+
+    /**
+     * Media types AniDB answers for — anime-first, also a 'series' source.
+     *
+     * @return list<non-empty-string> Always `['anime', 'series']`.
+     */
+    public function supportedMediaTypes(): array
+    {
+        return ['anime', 'series'];
+    }
+
+    /**
+     * @param string               $query   Free-text anime title.
+     * @param array<string, mixed> $options Optional hints (ignored by AniDB).
+     * @return list<array{id: non-empty-string, title: string, overview?: string, poster_path?: string}>
+     */
+    public function search(string $query, array $options = []): array
+    {
+        $results = [];
+        foreach ($this->adapter()->search($query, $options) as $row) {
+            $id = $row['id'] ?? '';
+            if (!is_string($id) || $id === '') {
+                continue; // a usable external id is mandatory for the host triad
+            }
+            /** @var array{id: non-empty-string, title: string, overview?: string, poster_path?: string} $entry */
+            $entry = ['id' => $id, 'title' => (string) ($row['title'] ?? '')];
+            if (isset($row['overview']) && is_string($row['overview'])) {
+                $entry['overview'] = $row['overview'];
+            }
+            if (isset($row['poster_path']) && is_string($row['poster_path'])) {
+                $entry['poster_path'] = $row['poster_path'];
+            }
+            $results[] = $entry;
+        }
+
+        return $results;
+    }
+
+    /**
+     * @param string               $externalId AniDB AID as a decimal string.
+     * @param array<string, mixed> $options    Optional hints (ignored).
+     * @return array<string, mixed>
+     */
+    public function getDetails(string $externalId, array $options = []): array
+    {
+        return $this->adapter()->getDetails($externalId, $options);
+    }
+
+    /**
+     * @param string $externalId AniDB AID as a decimal string.
+     * @return array<string, list<array{url: non-empty-string, width?: int, height?: int}>>
+     */
+    public function getImages(string $externalId): array
+    {
+        $images = [];
+        foreach ($this->adapter()->getImages($externalId) as $group => $entries) {
+            $list = [];
+            foreach ($entries as $entry) {
+                $url = $entry['url'] ?? '';
+                if (!is_string($url) || $url === '') {
+                    continue;
+                }
+                /** @var array{url: non-empty-string, width?: int, height?: int} $image */
+                $image = ['url' => $url];
+                if (isset($entry['width']) && is_int($entry['width'])) {
+                    $image['width'] = $entry['width'];
+                }
+                if (isset($entry['height']) && is_int($entry['height'])) {
+                    $image['height'] = $entry['height'];
+                }
+                $list[] = $image;
+            }
+            if ($list !== []) {
+                $images[(string) $group] = $list;
+            }
+        }
+
+        return $images;
     }
 
     /**

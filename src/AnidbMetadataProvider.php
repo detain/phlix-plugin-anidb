@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Phlix\Anidb;
 
 use Phlix\Anidb\Dto\AnimeDto;
+use Phlix\Anidb\Parser\EpisodeExtractor;
 use Phlix\Anidb\Parser\FilenameTitleExtractor;
 use Phlix\Anidb\TitleDump\TitleDumpIndexer;
 use Phlix\Anidb\TitleDump\TitleDumpManager;
@@ -120,6 +121,14 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     private FilenameTitleExtractor $filenameExtractor;
 
     /**
+     * Episode number extractor seam — parses episode patterns from filenames.
+     *
+     * Supports S01E02, 01x02, Episode 01, and standalone number formats
+     * to extract the episode number for anime-specific mapping.
+     */
+    private EpisodeExtractor $episodeExtractor;
+
+    /**
      * Title dump manager seam — owns the title index lifecycle.
      *
      * Nullable so it can be initialized lazily in onEnable() once settings are
@@ -155,6 +164,8 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      *     Defaults to {@see AnimeResponseParser}. Inject a mock in tests.
      * @param FilenameTitleExtractor|null $filenameExtractor Seam for title extraction.
      *     Defaults to a new instance. Inject a stub in tests to verify call counts.
+     * @param EpisodeExtractor|null $episodeExtractor Seam for episode number extraction.
+     *     Defaults to a new instance. Inject a stub in tests to verify call counts.
      * @param TitleDumpManager|null $titleDumpManager Seam for title-dump search.
      *     Defaults to null (initialized lazily in onEnable when use_title_dump is true).
      *     Inject a stub in tests to verify call counts or provide a pre-built index.
@@ -168,6 +179,7 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         ?WaiterInterface $waiter = null,
         ?AnimeResponseParser $animeParser = null,
         ?FilenameTitleExtractor $filenameExtractor = null,
+        ?EpisodeExtractor $episodeExtractor = null,
         ?TitleDumpManager $titleDumpManager = null,
         ?UdpClient $udpSession = null,
     ) {
@@ -180,6 +192,7 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         $this->waiter = $waiter ?? new ProductionWaiter();
         $this->animeParser = $animeParser ?? new AnimeResponseParser();
         $this->filenameExtractor = $filenameExtractor ?? new FilenameTitleExtractor();
+        $this->episodeExtractor = $episodeExtractor ?? new EpisodeExtractor();
         $this->titleDumpManager = $titleDumpManager;
         $this->udpSession = $udpSession ?? new UdpClient($this->settings, $this->udpClient, $this->waiter);
     }
@@ -468,7 +481,12 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      *     titles: array<int, string>,
      *     status: string|null,
      *     runtime_ticks: int|null,
-     *     studio: string|null
+     *     studio: string|null,
+     *     studios: list<string>,
+     *     source: string|null,
+     *     is_movie: bool,
+     *     synonyms: list<string>,
+     *     episode_number: int|null
      * }|array{} Matched anime metadata or empty array when not found.
      */
     public function lookup(string $filePath): array
@@ -479,20 +497,30 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
             return [];
         }
 
-        // Step 2: Find AID via title dump (fast, no API call) or API fallback
+        // Step 2: Extract episode number from filename (1x01, S01E01, etc.)
+        $episodeNumber = $this->episodeExtractor->extract(pathinfo($filePath, PATHINFO_FILENAME));
+
+        // Step 3: Find AID via title dump (fast, no API call) or API fallback
         $aid = $this->findAidByTitle($animeName);
         if ($aid === null) {
             return [];
         }
 
-        // Step 3: Fetch anime details from AniDB
+        // Step 4: Fetch anime details from AniDB
         $anime = $this->fetchAnimeDetails($aid);
         if ($anime === null) {
             return [];
         }
 
-        // Step 4: Map to return shape expected by MetadataManager
-        return $this->mapToMetadataReturn($anime);
+        // Step 5: Map to return shape expected by MetadataManager
+        $result = $this->mapToMetadataReturn($anime);
+
+        // Step 6: Add extracted episode number for anime-specific mapping
+        if ($episodeNumber !== null) {
+            $result['episode_number'] = $episodeNumber;
+        }
+
+        return $result;
     }
 
     // -------------------------------------------------------------------------
@@ -719,6 +747,8 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
             }
         }
 
+        $type = is_string($anime['type']) ? $this->mapType($anime['type']) : null;
+
         return [
             'title'         => $anime['romaji'],
             'original_name' => $anime['english'] ?: ($anime['kanji'] ?: null),
@@ -730,12 +760,17 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
             'poster_url'   => $posterUrl,
             'fanart_url'   => null,
             'episodes'     => $anime['episodes'] ?: null,
-            'type'         => is_string($anime['type']) ? $this->mapType($anime['type']) : null,
+            'type'         => $type,
             'anidb_id'     => $anime['aid'],
             'titles'       => array_values(array_unique($allTitles)),
             'status'       => $this->mapAnimeStatus($anime),
             'runtime_ticks'=> null, // AniDB doesn't provide episode length in basic response
             'studio'       => null, // AniDB doesn't have a single "studio" field; categories used instead
+            // P9-S5: Extended anime-specific fields
+            'studios'      => $anime['studios'] ?? [],
+            'source'       => $anime['source'] ?? null,
+            'is_movie'     => $anime['is_movie'] ?? ($type === 'movie'),
+            'synonyms'     => $anime['synonyms'] ?? [],
         ];
     }
 

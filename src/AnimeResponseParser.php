@@ -79,6 +79,7 @@ final class AnimeResponseParser
     private function buildAnimeFromFields(array $fields): array
     {
         // categories/tags are not included in amask=00f0f0f0000000 — set honest empty
+        // @see AnimeResponseParser::parseAnimeResponse for mask details
         $categories = [];
 
         // Parse year: "1999-2000" or "1999"
@@ -95,6 +96,9 @@ final class AnimeResponseParser
         $rating = (int)$fields[19];
         $ratingFloat = $rating > 0 ? $rating / 100 : null;
 
+        $rawType = self::decode($fields[3]);
+        $episodes = (int)$fields[12];
+
         $anime = [
             'aid'            => (int)$fields[0],
             'romaji'         => self::decode($fields[6]),
@@ -102,12 +106,12 @@ final class AnimeResponseParser
             'kanji'          => self::decode($fields[7]),
             'other'          => self::decode($fields[9]),
             'synonyms'       => array_filter(array_map('trim', explode(',', self::decode($fields[10])))),
-            'episodes'       => (int)$fields[12],
+            'episodes'       => $episodes,
             'specials'       => (int)$fields[14],
             'highest_ep'     => (int)$fields[13],
             'year'           => $yearStr,
             'year_int'       => $year,
-            'type'           => self::decode($fields[3]),
+            'type'           => $rawType,
             'categories'     => $categories,
             'rating'         => $ratingFloat,
             'vote_count'     => (int)$fields[20],
@@ -118,8 +122,47 @@ final class AnimeResponseParser
             'url'            => 'https://anidb.net/' . $fields[0],
             'picname'        => self::decode($fields[18]),
             'is_18plus'      => (int)$fields[26] === 1,
+            // Extended fields (require additional API calls or enhanced mask)
+            'studios'        => [], // AniDB basic response doesn't include studios
+            'source'         => null, // AniDB uses categories for source info (manga, LN, original)
+            // Computed fields for better series/movie detection
+            'is_movie'       => $this->detectIsMovie($rawType, $episodes),
         ];
 
         return $anime;
+    }
+
+    /**
+     * Detect if an anime is likely a movie based on its type and episode count.
+     *
+     * AniDB types that indicate movies:
+     * - Movie (single episode, typically 1-3 hours)
+     * - Music Video (short video clips)
+     *
+     * AniDB types that indicate series (possibly with episodes):
+     * - TV Series, OVA, ONA, Special
+     *
+     * @param string $type The raw AniDB type string.
+     * @param int    $episodes The episode count.
+     *
+     * @return bool True if likely a movie, false if likely a series.
+     */
+    private function detectIsMovie(string $type, int $episodes): bool
+    {
+        $movieTypes = ['movie', 'music video'];
+        $lowerType = mb_strtolower($type);
+
+        foreach ($movieTypes as $movieType) {
+            if (str_contains($lowerType, $movieType)) {
+                return true;
+            }
+        }
+
+        // Heuristic: if type is unknown/empty but episodes is 1, likely a movie
+        if ($type === '' && $episodes === 1) {
+            return true;
+        }
+
+        return false;
     }
 }

@@ -1,6 +1,6 @@
 {
     "name": "phlix-plugin-anidb",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "phlix_min_server_version": "0.10.0",
     "type": "metadata-provider",
     "entry": "Phlix\\Anidb\\AnidbMetadataProvider",

@@ -26,7 +26,7 @@ readonly class AnimeDto
      * @param string $year Year string (e.g. "1999" or "1999-2000").
      * @param int|null $year_int Parsed integer year or null.
      * @param string $type Anime type (e.g. "TV Series", "Movie", "OVA").
-     * @param list<string> $categories Always empty per amask=00f0f0f0000000.
+     * @param list<string> $categories List of category tags.
      * @param float|null $rating Weighted rating (0.0-10.0 scale).
      * @param int $vote_count Number of votes.
      * @param float|null $temp_rating Temporary rating (0.0-10.0 scale).
@@ -36,6 +36,8 @@ readonly class AnimeDto
      * @param string $url AniDB URL.
      * @param string $picname Poster image filename.
      * @param bool $is_18plus Whether the anime is 18+ restricted.
+     * @param list<string> $studios List of studios/production companies (populated via separate API call).
+     * @param string|null $source The source material (e.g. "manga", "light novel", "original").
      */
     public function __construct(
         public int $aid,
@@ -60,6 +62,8 @@ readonly class AnimeDto
         public string $url,
         public string $picname,
         public bool $is_18plus,
+        public array $studios = [],
+        public ?string $source = null,
     ) {
     }
 
@@ -95,6 +99,8 @@ readonly class AnimeDto
             url: self::toString($data['url'] ?? null),
             picname: self::toString($data['picname'] ?? null),
             is_18plus: self::toBool($data['is_18plus'] ?? null),
+            studios: self::toListOfStrings($data['studios'] ?? null),
+            source: self::toNullableString($data['source'] ?? null),
         );
     }
 
@@ -184,6 +190,17 @@ readonly class AnimeDto
             return $value !== '' && $value !== '0' && mb_strtolower($value) !== 'false';
         }
         return false;
+    }
+
+    private static function toNullableString(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (is_string($value)) {
+            return $value === '' ? null : $value;
+        }
+        return null;
     }
 
     /**

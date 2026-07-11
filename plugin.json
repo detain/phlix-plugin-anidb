@@ -1,7 +1,7 @@
 {
     "name": "phlix-plugin-anidb",
-    "version": "0.2.0",
-    "phlix_min_server_version": "0.10.0",
+    "version": "0.3.0",
+    "phlix_min_server_version": "1.2.0",
     "type": "metadata-provider",
     "entry": "Phlix\\Anidb\\AnidbMetadataProvider",
     "events": [],
@@ -10,28 +10,32 @@
             "type": "string",
             "required": true,
             "label": "AniDB Username",
-            "description": "Your AniDB username (NOT the API password — see docs)"
+            "description": "Your AniDB account username (NOT the API password). Registration is free.",
+            "link": "https://anidb.net/",
+            "link_text": "Create an AniDB account"
         },
         "api_key": {
             "type": "string",
             "required": true,
             "secret": true,
-            "label": "AniDB API Password",
-            "description": "The API password from your AniDB profile (NOT your login password)"
+            "label": "AniDB UDP API Key",
+            "description": "The UDP \"API Key\" (a.k.a. API password) you set in your AniDB profile under Settings → Account → API. This is SEPARATE from your website login password.",
+            "link": "https://anidb.net/software/api",
+            "link_text": "AniDB API docs"
         },
         "use_title_dump": {
             "type": "boolean",
             "required": false,
             "default": true,
             "label": "Use AniDB Title Dump",
-            "description": "Download the daily anime titles dump for fast offline search. Recommended — reduces API calls."
+            "description": "Download the daily anime titles dump for fast, offline search. Recommended — it greatly reduces rate-limited API calls."
         },
         "title_dump_url": {
             "type": "string",
             "required": false,
             "default": "http://anidb.net/api/anime-titles.dat.gz",
             "label": "Title Dump URL",
-            "description": "URL to the anime-titles.dat.gz file. Change only if using a mirror."
+            "description": "Source URL for the anime-titles.dat.gz file. Optional — change only if using a mirror."
         }
     },
     "signature": null

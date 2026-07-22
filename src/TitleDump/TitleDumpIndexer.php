@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Phlix\Anidb\TitleDump;
 
 use RuntimeException;
-use Workerman\HttpClient;
+use Workerman\Http\Client;
 
 /**
  * Downloads and indexes the AniDB anime-titles.dat.gz dump.
@@ -55,7 +55,7 @@ final class TitleDumpIndexer
      * @param string      $cacheDir     Directory to store the index file.
      * @param string      $titleDumpUrl URL to anime-titles.dat.gz.
      * @param callable|null $httpClient Injectable HTTP client. Defaults to a
-     *     non-blocking Workerman\HttpClient wrapper. The callable receives (url, callback)
+     *     non-blocking Workerman\Http\Client wrapper. The callable receives (url, callback)
      *     where callback is invoked with raw gzipped bytes or null on failure.
      */
     public function __construct(
@@ -245,47 +245,62 @@ final class TitleDumpIndexer
     }
 
     /**
-     * Default non-blocking HTTP client using Workerman\HttpClient.
+     * Default non-blocking HTTP client using {@see \Workerman\Http\Client}.
      *
-     * B5: Changed from blocking file_get_contents to non-blocking Workerman\HttpClient
-     * which uses the event loop for async HTTP requests.
+     * Uses the canonical cooperative-wait pattern from phlix-server/CLAUDE.md:
+     * fire the async request, then poll `usleep(1000)` yielding to the event
+     * loop until the success/error callback flips a done flag (or the max wait
+     * elapses). This NEVER blocks the worker on a synchronous socket read.
+     *
+     * When the Workerman runtime is unavailable (unit tests / CLI), we return
+     * null immediately rather than falling back to a blocking
+     * `file_get_contents` — that fallback was the 60s boot-hang landmine
+     * (item-5c3, the 2026-07-18 prod revert). The download only ever runs on
+     * the lazy/deferred connect path, never at boot.
      *
      * @param string               $url      URL to fetch.
      * @param callable(?string): void $onResult Callback with raw bytes or null.
      */
     private static function defaultHttpClient(string $url, callable $onResult): void
     {
-        // Gracefully handle when Workerman\HttpClient is unavailable (tests/CLI).
-        if (!class_exists(HttpClient::class)) {
-            // Fall back to blocking implementation when Workerman is not available.
-            $context = stream_context_create([
-                'http' => [
-                    'method'  => 'GET',
-                    'timeout' => 60,
-                    'header'  => [
-                        'Accept-Encoding: gzip, deflate',
-                        'User-Agent: phlix-anidb-plugin/1.0',
-                    ],
-                ],
-            ]);
-
-            $body = @file_get_contents($url, false, $context);
-            $onResult($body !== false ? $body : null);
+        // No blocking fallback: Workerman\Http\Client is the ONLY acceptable
+        // transport. Without the runtime, skip the download (offline index
+        // simply stays empty and the UDP path serves as fallback).
+        if (!class_exists(Client::class)) {
+            $onResult(null);
 
             return;
         }
 
-        $client = new HttpClient($url, [
+        /** @var array{done: bool, body: ?string} $state */
+        $state = ['done' => false, 'body' => null];
+
+        $client = new Client(['timeout' => 60]);
+        $client->request($url, [
+            'method'  => 'GET',
             'headers' => [
                 'Accept-Encoding' => 'gzip, deflate',
                 'User-Agent'      => 'phlix-anidb-plugin/1.0',
             ],
-            'timeout' => 60,
+            'success' => static function ($response) use (&$state): void {
+                $body = (string) $response->getBody();
+                $state['body'] = $body !== '' ? $body : null;
+                $state['done'] = true;
+            },
+            'error' => static function () use (&$state): void {
+                $state['body'] = null;
+                $state['done'] = true;
+            },
         ]);
 
-        $client->get(function ($response) use ($onResult): void {
-            $body = $response->getBody();
-            $onResult($body !== '' ? $body : null);
-        });
+        // Cooperative wait — yields to the event loop so other tasks proceed.
+        $waited  = 0.0;
+        $maxWait = 60.0;
+        while (!$state['done'] && $waited < $maxWait) {
+            usleep(1000); // 1ms
+            $waited += 0.001;
+        }
+
+        $onResult($state['body']);
     }
 }

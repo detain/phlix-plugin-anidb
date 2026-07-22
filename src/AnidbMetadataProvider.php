@@ -67,6 +67,16 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     private const API_PORT = 9000;
 
     /**
+     * AniDB image CDN base URL for anime posters (picname is appended).
+     *
+     * The API host (api.anidb.net) does NOT serve images; posters live on the
+     * dedicated image CDN.
+     *
+     * @see https://wiki.anidb.net/FAQ:Pictures
+     */
+    private const IMAGE_CDN_BASE = 'https://cdn-eu.anidb.net/images/main/';
+
+    /**
      * Plugin settings from plugin.json.
      *
      * @var array{username: string, api_key: string, use_title_dump: bool, title_dump_url: string}
@@ -142,6 +152,16 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     private string $cacheDir;
 
     /**
+     * Whether the lazy/deferred "connect" step has run yet.
+     *
+     * onEnable() only performs the cheap "wire" step (register source, no I/O).
+     * The first actual lookup triggers {@see ensureConnected()} — opening the
+     * UDP socket and scheduling the (non-blocking) title-dump download. This
+     * guard ensures that only happens once and NEVER at boot (item-5c3).
+     */
+    private bool $connected = false;
+
+    /**
      * Lazily-built host-contract adapter, reused by both the legacy
      * {@see registerWithMetadataManager()} path and the
      * {@see MetadataSourceInterface} triad below so a single object owns the
@@ -172,6 +192,13 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      * @param UdpClient|null $udpSession High-level UDP session (AUTH, session key,
      *     flood protection, 506 retry). Defaults to new UdpClient($settings, $udpClient, $waiter).
      *     Inject a test double to verify call counts without network I/O.
+     * @param string|null $cacheDir Writable directory for the title-dump index.
+     *     MUST live OUTSIDE the plugin tree — the plugin dir is read-only under the
+     *     systemd sandbox (the /var/artwork lesson). Resolution order: explicit
+     *     arg → $settings['cache_dir'] → env PHLIX_ANIDB_CACHE_DIR →
+     *     sys_get_temp_dir()/phlix-plugin-anidb. Wave 2 must inject the host's
+     *     configured writable path (e.g. /var/cache/phlix/anidb) and add it to the
+     *     systemd ReadWritePaths + install.sh.
      */
     public function __construct(
         array $settings,
@@ -182,9 +209,10 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         ?EpisodeExtractor $episodeExtractor = null,
         ?TitleDumpManager $titleDumpManager = null,
         ?UdpClient $udpSession = null,
+        ?string $cacheDir = null,
     ) {
         $this->settings = $settings;
-        $this->cacheDir = dirname(__DIR__) . '/var/plugins/phlix-plugin-anidb';
+        $this->cacheDir = $this->resolveCacheDir($settings, $cacheDir);
         $this->udpClient = $udpClient ?? new SocketUdpClient(
             self::API_HOST,
             self::API_PORT,
@@ -198,11 +226,17 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     }
 
     /**
-     * Called by the loader once when the plugin is enabled.
+     * Called by the loader once when the plugin is enabled — the cheap "WIRE"
+     * step ONLY.
      *
-     * Opens the UDP socket and registers with the host MetadataManager.
-     * AUTH is deferred to first-use (lazy) so onEnable() never blocks the
-     * resident worker on network I/O. The title dump is also lazy-loaded.
+     * This runs across ~14 workers at boot (once F1 boot-activation lands), so
+     * it MUST NOT do any network / DB / socket / download I/O — that was the
+     * item-5c3 landmine (the 60s blocking title-dump download that caused the
+     * 2026-07-18 prod revert). All of that moves to the lazy/deferred
+     * {@see ensureConnected()} step which runs on first actual lookup.
+     *
+     * The wire step: construct the title-dump manager seam (no download) and
+     * self-register the source with the host MetadataManager.
      *
      * @param ContainerInterface $container Host PSR-11 container.
      *
@@ -212,16 +246,13 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     {
         $this->container = $container;
 
-        $this->udpSession->open();
-
-        // Lazy-load title index on first lookup if enabled
+        // Construct the title-dump manager seam WITHOUT touching the network or
+        // disk. The download + index load are deferred to ensureConnected().
         if ($this->settings['use_title_dump'] && $this->titleDumpManager === null) {
             $this->titleDumpManager = new TitleDumpManager(
                 $this->cacheDir,
                 $this->settings['title_dump_url'],
             );
-            $this->titleDumpManager->ensureCacheDir();
-            $this->titleDumpManager->ensureLoaded();
         }
 
         // Self-register with the host MetadataManager so the server's metadata
@@ -231,6 +262,66 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         // getImages/getProviders/getSourceName) — the same self-registration
         // pattern the built-in Oidc/Ldap plugins use against AuthProviderRegistry.
         $this->registerWithMetadataManager($container);
+    }
+
+    /**
+     * Lazy/deferred "CONNECT" step — runs on first actual lookup, NEVER at boot.
+     *
+     * Opens the UDP transport (AUTH itself stays deferred inside
+     * {@see UdpClient::sendCommand()}) and triggers the title-dump download +
+     * offline index load. The download is non-blocking (cooperative-wait
+     * {@see \Workerman\Http\Client}, scheduled off the event loop). The offline
+     * title dump is the PRIMARY matching path; the rate-limited UDP API is the
+     * fallback, guarded by the 4s flood-protection interval.
+     *
+     * @return void
+     */
+    private function ensureConnected(): void
+    {
+        if ($this->connected) {
+            return;
+        }
+        $this->connected = true;
+
+        $this->udpSession->open();
+
+        if ($this->titleDumpManager !== null) {
+            // Schedules the (deferred, non-blocking) download and loads the
+            // offline index from the writable cache dir.
+            $this->titleDumpManager->ensureCacheDir();
+            $this->titleDumpManager->ensureLoaded();
+        }
+    }
+
+    /**
+     * Resolve a WRITABLE cache directory for the title-dump index.
+     *
+     * MUST live outside the read-only plugin tree (systemd sandbox). Resolution
+     * order: explicit constructor arg → $settings['cache_dir'] → env
+     * PHLIX_ANIDB_CACHE_DIR → sys_get_temp_dir()/phlix-plugin-anidb.
+     *
+     * @param array<string, mixed> $settings Plugin settings.
+     * @param string|null          $explicit Explicit constructor override.
+     *
+     * @return string Absolute writable cache directory path.
+     */
+    private function resolveCacheDir(array $settings, ?string $explicit): string
+    {
+        if ($explicit !== null && $explicit !== '') {
+            return $explicit;
+        }
+
+        $fromSettings = $settings['cache_dir'] ?? null;
+        if (is_string($fromSettings) && $fromSettings !== '') {
+            return $fromSettings;
+        }
+
+        $fromEnv = getenv('PHLIX_ANIDB_CACHE_DIR');
+        if (is_string($fromEnv) && $fromEnv !== '') {
+            return $fromEnv;
+        }
+
+        return sys_get_temp_dir() . '/phlix-plugin-anidb';
     }
 
     /**
@@ -304,13 +395,17 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     }
 
     /**
-     * Media types AniDB answers for — anime-first, also a 'series' source.
+     * Media types AniDB answers for.
      *
-     * @return list<non-empty-string> Always `['anime', 'series']`.
+     * Per plan_plugins.md §4 decision 1, anime is treated as ordinary
+     * `series`/`movie` — no `anime` schema type, no `anime` media-type claim.
+     * Matching is by title through the existing series/movie enrichment path.
+     *
+     * @return list<non-empty-string> Always `['series', 'movie']`.
      */
     public function supportedMediaTypes(): array
     {
-        return ['anime', 'series'];
+        return ['series', 'movie'];
     }
 
     /**
@@ -400,6 +495,8 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
             return null;
         }
 
+        $this->ensureConnected();
+
         return $this->findAidByTitle($trimmed);
     }
 
@@ -420,6 +517,8 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         if ($aid <= 0) {
             return [];
         }
+
+        $this->ensureConnected();
 
         $anime = $this->fetchAnimeDetails($aid);
         if ($anime === null) {
@@ -496,6 +595,9 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         if ($animeName === null) {
             return [];
         }
+
+        // Lazy connect on first real use — never at boot (item-5c3).
+        $this->ensureConnected();
 
         // Step 2: Extract episode number from filename (1x01, S01E01, etc.)
         $episodeNumber = $this->episodeExtractor->extract(pathinfo($filePath, PATHINFO_FILENAME));
@@ -743,7 +845,9 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         if (!empty($anime['picname'])) {
             $whitelisted = $this->validateImageFilename($anime['picname']);
             if ($whitelisted !== null) {
-                $posterUrl = 'https://api.anidb.net/images/' . $whitelisted;
+                // AniDB serves anime images from its image CDN, NOT the API host
+                // (api.anidb.net is UDP/HTTP-API only and 404s image paths).
+                $posterUrl = self::IMAGE_CDN_BASE . $whitelisted;
             }
         }
 

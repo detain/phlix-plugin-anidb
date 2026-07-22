@@ -83,24 +83,69 @@ final class AnidbMetadataProviderTest extends TestCase
         ];
     }
 
-    public function test_returns_empty_array_for_unknown_path(): void
+    public function test_lookup_lazily_connects_and_returns_empty_on_no_match(): void
     {
-        $provider = new AnidbMetadataProvider([
-            'username' => 'testuser',
-            'api_key' => 'testkey',
-            'use_title_dump' => true,
-            'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
-        ]);
+        // Fake transport: valid AUTH, then a timeout (null) for the ANIME lookup.
+        // No real socket, no network. Verifies lazy-connect (socket open on first
+        // use, NOT at construction) and an empty result when nothing matches.
+        $transport = new class implements \Phlix\Anidb\Udp\UdpClientInterface {
+            public bool $opened = false;
+            /** @var list<string|null> */
+            public array $responses = ['200 SESSIONKEY LOGIN ACCEPTED', null];
+            public function open(): void
+            {
+                $this->opened = true;
+            }
+            public function send(string $data): ?string
+            {
+                return array_shift($this->responses);
+            }
+            public function close(): void
+            {
+            }
+            public function lastReplyHost(): ?string
+            {
+                return 'api.anidb.net';
+            }
+            public function lastReplyPort(): ?int
+            {
+                return 9000;
+            }
+        };
+        $waiter = new class implements \Phlix\Anidb\Udp\WaiterInterface {
+            public function wait(float $seconds): void
+            {
+            }
+        };
+        $udpSession = new \Phlix\Anidb\Udp\UdpClient(
+            ['username' => 'testuser', 'api_key' => 'testkey'],
+            $transport,
+            $waiter,
+        );
 
-        // NOTE: lookup() requires onEnable() to be called first to open the UDP socket.
-        // Without onEnable(), it will throw "UDP socket not open".
-        // This test documents the behavior: without a title dump loaded and without
-        // network access, lookup cannot function.
-        // In a real integration test with a mocked UdpClient, this would return [].
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('UDP socket not open');
+        $provider = new AnidbMetadataProvider(
+            [
+                'username' => 'testuser',
+                'api_key' => 'testkey',
+                'use_title_dump' => false,
+                'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
+            ],
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            $udpSession,
+        );
 
-        $provider->lookup('/nonexistent/path/to/Some.Random.Anime.S01E01.mkv');
+        // Socket must NOT be opened until the first lookup (lazy connect).
+        $this->assertFalse($transport->opened);
+
+        $result = $provider->lookup('/nonexistent/path/to/Some.Random.Anime.S01E01.mkv');
+
+        $this->assertSame([], $result);
+        $this->assertTrue($transport->opened);
     }
 
     public function test_subscribed_events_returns_empty_array(): void
@@ -211,7 +256,7 @@ final class AnidbMetadataProviderTest extends TestCase
         $this->assertSame(['SciFi', 'Space', 'Adventure'], $result['genres']);
         $this->assertSame(8.53, $result['rating']);
         $this->assertSame(3225, $result['vote_count']);
-        $this->assertSame('https://api.anidb.net/images/1.jpg', $result['poster_url']);
+        $this->assertSame('https://cdn-eu.anidb.net/images/main/1.jpg', $result['poster_url']);
         $this->assertSame(13, $result['episodes']);
         $this->assertSame('tv', $result['type']);
         $this->assertSame(1, $result['anidb_id']);
@@ -347,7 +392,10 @@ final class AnidbMetadataProviderTest extends TestCase
 
         $this->assertInstanceOf(MetadataSourceInterface::class, $provider);
         $this->assertSame('anidb', $provider->sourceName());
-        $this->assertSame(['anime', 'series'], $provider->supportedMediaTypes());
+        // Anime is treated as ordinary series/movie (plan_plugins §4 decision 1);
+        // there is deliberately no 'anime' media-type claim.
+        $this->assertSame(['series', 'movie'], $provider->supportedMediaTypes());
+        $this->assertNotContains('anime', $provider->supportedMediaTypes());
     }
 
     public function test_metadata_source_lookups_return_empty_for_invalid_external_id(): void

@@ -79,16 +79,33 @@ final class UdpClient
     private WaiterInterface $waiter;
 
     /**
+     * Valid reply-origin hosts for datagram origin validation.
+     *
+     * When null it is resolved lazily from {@see API_HOST} (hostname + all its
+     * A-record IPs) so the numeric peer IP reported by `recvfrom()` can be
+     * compared like-for-like. Injectable so tests can assert origin validation
+     * against a realistic dotted-quad without live DNS.
+     *
+     * @var list<string>|null
+     */
+    private ?array $validOriginHosts;
+
+    /**
      * @param array{username: string, api_key: string} $settings AniDB credentials.
      * @param UdpClientInterface|null                   $transport Raw UDP transport. Defaults to
      *                                                                SocketUdpClient bound to AniDB endpoint.
      * @param WaiterInterface|null                     $waiter Flood-protection waiter. Defaults to
      *                                                             ProductionWaiter (blocking).
+     * @param list<string>|null                        $validOriginHosts Explicit set of acceptable
+     *                                                             reply-origin hosts (IPs and/or the
+     *                                                             hostname). Defaults to null → resolved
+     *                                                             from API_HOST via gethostbynamel().
      */
     public function __construct(
         array $settings,
         ?UdpClientInterface $transport = null,
         ?WaiterInterface $waiter = null,
+        ?array $validOriginHosts = null,
     ) {
         $this->settings = $settings;
         $this->transport = $transport ?? new SocketUdpClient(
@@ -96,6 +113,7 @@ final class UdpClient
             self::API_PORT,
         );
         $this->waiter = $waiter ?? new ProductionWaiter();
+        $this->validOriginHosts = $validOriginHosts;
     }
 
     /**
@@ -167,9 +185,12 @@ final class UdpClient
                 );
             }
             $this->authenticate();
-            // Strip the old session key from fullCommand and retry
-            $retryCommand = str_replace('&s=' . $this->sessionKey, '', $fullCommand);
-            $result = $this->sendCommand($retryCommand, $retryCount + 1);
+            // Retry with the ORIGINAL command (which carries no session key);
+            // sendCommand() re-appends the freshly-minted key. NB: authenticate()
+            // has already replaced $this->sessionKey, so str_replace()-ing the
+            // NEW key out of $fullCommand (which still holds the OLD key) stripped
+            // the wrong key and left a stale &s= in the retried command.
+            $result = $this->sendCommand($command, $retryCount + 1);
         }
 
         return $result;
@@ -296,18 +317,57 @@ final class UdpClient
 
         $response = $this->transport->send($data);
 
-        // S2/S3 origin validation: reject replies not from api.anidb.net:9000
+        // S2/S3 origin validation: reject replies not from api.anidb.net:9000.
         // This prevents forged responses from being accepted.
         if ($response !== null) {
-            $replyHost = $this->transport->lastReplyHost();
-            $replyPort = $this->transport->lastReplyPort();
-
-            if ($replyHost !== self::API_HOST || $replyPort !== self::API_PORT) {
+            if (!$this->isValidReplyOrigin($this->transport->lastReplyHost(), $this->transport->lastReplyPort())) {
                 return null; // Spoofed or misrouted reply — signal caller to retry
             }
         }
 
         return $response;
+    }
+
+    /**
+     * Whether a datagram reply came from the legitimate AniDB endpoint.
+     *
+     * The datagram peer reported by `recvfrom()` is a numeric IP, NEVER a
+     * hostname — so comparing it against the `api.anidb.net` hostname constant
+     * (the original bug) could never succeed and every real reply was dropped.
+     * We instead compare like-for-like against the RESOLVED IPs of the API host.
+     *
+     * @param string|null $replyHost Reply source host (IP) reported by the transport.
+     * @param int|null    $replyPort Reply source port reported by the transport.
+     *
+     * @return bool True when the origin is trusted.
+     */
+    private function isValidReplyOrigin(?string $replyHost, ?int $replyPort): bool
+    {
+        if ($replyPort !== self::API_PORT || $replyHost === null) {
+            return false;
+        }
+
+        return in_array($replyHost, $this->resolveValidOriginHosts(), true);
+    }
+
+    /**
+     * Resolve (and memoize) the set of acceptable reply-origin hosts.
+     *
+     * @return list<string> Hostname + its resolved A-record IPs.
+     */
+    private function resolveValidOriginHosts(): array
+    {
+        if ($this->validOriginHosts !== null) {
+            return $this->validOriginHosts;
+        }
+
+        $hosts = [self::API_HOST];
+        $ips = @gethostbynamel(self::API_HOST);
+        if (is_array($ips)) {
+            $hosts = array_merge($hosts, $ips);
+        }
+
+        return $this->validOriginHosts = array_values(array_unique($hosts));
     }
 
     /**

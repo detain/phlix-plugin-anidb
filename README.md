@@ -91,7 +91,7 @@ See the [AniDB UDP API docs](https://wiki.anidb.net/UDP_API_Definition) for full
     'genres'        => ['SciFi', 'Space'],       // Category tags
     'rating'        => 8.53,                     // AniDB rating (0-10)
     'vote_count'    => 3225,                     // Number of votes
-    'poster_url'    => 'https://api.anidb.net/images/1.jpg',  // null if no picname
+    'poster_url'    => 'https://cdn-eu.anidb.net/images/main/1.jpg',  // null if no picname
     'fanart_url'    => null,                     // Not provided by AniDB
     'episodes'      => 13,                       // Episode count (null if unknown)
     'type'          => 'tv',                      // Normalized type (tv, movie, ova, etc.)

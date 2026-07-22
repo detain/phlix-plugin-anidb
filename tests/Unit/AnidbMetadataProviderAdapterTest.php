@@ -129,7 +129,7 @@ final class AnidbMetadataProviderAdapterTest extends TestCase
         $this->assertSame('anidb', $name);
         $this->assertInstanceOf(AnidbMetadataProviderAdapter::class, $registeredProvider);
         $this->assertInstanceOf(MetadataProviderInterface::class, $registeredProvider);
-        $this->assertSame(['anime', 'series'], $types);
+        $this->assertSame(['series', 'movie'], $types);
     }
 
     public function test_on_enable_registration_is_noop_when_manager_absent(): void

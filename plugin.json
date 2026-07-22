@@ -1,6 +1,6 @@
 {
     "name": "phlix-plugin-anidb",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "phlix_min_server_version": "1.2.0",
     "type": "metadata-provider",
     "entry": "Phlix\\Anidb\\AnidbMetadataProvider",
@@ -9,6 +9,7 @@
         "username": {
             "type": "string",
             "required": true,
+            "tier": "standard",
             "label": "AniDB Username",
             "description": "Your AniDB account username (NOT the API password). Registration is free.",
             "link": "https://anidb.net/",
@@ -18,6 +19,7 @@
             "type": "string",
             "required": true,
             "secret": true,
+            "tier": "standard",
             "label": "AniDB UDP API Key",
             "description": "The UDP \"API Key\" (a.k.a. API password) you set in your AniDB profile under Settings → Account → API. This is SEPARATE from your website login password.",
             "link": "https://anidb.net/software/api",
@@ -27,6 +29,7 @@
             "type": "boolean",
             "required": false,
             "default": true,
+            "tier": "advanced",
             "label": "Use AniDB Title Dump",
             "description": "Download the daily anime titles dump for fast, offline search. Recommended — it greatly reduces rate-limited API calls."
         },
@@ -34,6 +37,7 @@
             "type": "string",
             "required": false,
             "default": "http://anidb.net/api/anime-titles.dat.gz",
+            "tier": "advanced",
             "label": "Title Dump URL",
             "description": "Source URL for the anime-titles.dat.gz file. Optional — change only if using a mirror."
         }

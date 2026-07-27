@@ -243,8 +243,8 @@ final class AnidbUdpRetryAndOriginTest extends TestCase
             'empty string'    => ['', null],
             'null value'      => [null, null],
             'protocol-relative' => ['//evil/x.jpg', null],
-            'clean filename' => ['1.jpg', 'https://api.anidb.net/images/1.jpg'],
-            'anime poster'    => ['12345.jpg', 'https://api.anidb.net/images/12345.jpg'],
+            'clean filename' => ['1.jpg', 'https://cdn-eu.anidb.net/images/main/1.jpg'],
+            'anime poster'    => ['12345.jpg', 'https://cdn-eu.anidb.net/images/main/12345.jpg'],
         ];
     }
 
@@ -292,7 +292,7 @@ final class AnidbUdpRetryAndOriginTest extends TestCase
 
         $result = $method->invoke($provider, $anime);
 
-        $this->assertSame('https://api.anidb.net/images/99.jpg', $result['poster_url']);
+        $this->assertSame('https://cdn-eu.anidb.net/images/main/99.jpg', $result['poster_url']);
         $this->assertSame(99, $result['anidb_id']);
         $this->assertSame('Good Anime', $result['title']);
     }

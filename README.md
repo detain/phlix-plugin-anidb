@@ -41,12 +41,18 @@ The plugin is unsigned by design. Install via the Phlix admin UI:
 
 ## Configuration
 
+Configure these in the Phlix admin **Plugins → Configure** dialog.
+
 | Setting | Type | Required | Default | Description |
 |---------|------|----------|---------|-------------|
-| `username` | string | Yes | — | AniDB username |
-| `api_key` | string (secret) | Yes | — | AniDB API password from profile |
-| `use_title_dump` | boolean | No | `true` | Use daily title dump for fast search |
-| `title_dump_url` | string | No | AniDB official | URL to `anime-titles.dat.gz` |
+| `username` | string | **Yes** | — | Your AniDB account username. [Register free](https://anidb.net/). |
+| `api_key` | string (secret) | **Yes** | — | The UDP **API Key** (API password) set in your AniDB profile under Settings → Account → API — separate from your login password. See the [AniDB API docs](https://anidb.net/software/api). |
+| `use_title_dump` | boolean | No | `true` | Download the daily title dump for fast, offline search (reduces rate-limited API calls). |
+| `title_dump_url` | string | No | AniDB official | URL to `anime-titles.dat.gz`; change only for a mirror. |
+
+> The AniDB UDP API authenticates with your **username** + a separate **API Key** you set in your
+> profile (not your website login password). Set the API Key under
+> [your AniDB profile](https://anidb.net/) → Settings → Account → API.
 
 ## How It Works
 
@@ -85,7 +91,7 @@ See the [AniDB UDP API docs](https://wiki.anidb.net/UDP_API_Definition) for full
     'genres'        => ['SciFi', 'Space'],       // Category tags
     'rating'        => 8.53,                     // AniDB rating (0-10)
     'vote_count'    => 3225,                     // Number of votes
-    'poster_url'    => 'https://api.anidb.net/images/1.jpg',  // null if no picname
+    'poster_url'    => 'https://cdn-eu.anidb.net/images/main/1.jpg',  // null if no picname
     'fanart_url'    => null,                     // Not provided by AniDB
     'episodes'      => 13,                       // Episode count (null if unknown)
     'type'          => 'tv',                      // Normalized type (tv, movie, ova, etc.)

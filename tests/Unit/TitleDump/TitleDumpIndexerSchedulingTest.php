@@ -12,6 +12,7 @@ declare(strict_types=1);
 namespace Phlix\Anidb\Tests\Unit\TitleDump;
 
 use Phlix\Anidb\TitleDump\TitleDumpIndexer;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\PreserveGlobalState;
 use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
@@ -302,11 +303,15 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         // regular file, and the directory itself is perfectly healthy. It uses
         // no permission bits, so it reproduces identically for every uid
         // including root (the trap F4 removed from these tests).
+        //
+        // The genuine refusal goes FIRST here on purpose. That state is also
+        // {@see TitleDumpIndexer::reportBlockedMarkerPath()}'s (closing-round
+        // finding 2), and the two notices deliberately share ONE per-process
+        // budget — so ordering the real refusal first is what keeps this test
+        // measuring what it is named for: that a blocked marker path is never
+        // diagnosed as an unusable cache DIRECTORY.
         $log = $this->makeTmpDir() . '/error.log';
         ini_set('error_log', $log);
-
-        $dir = $this->makeTmpDir();
-        mkdir($dir . '/title_index.download.lock', 0755);
 
         $fetches = 0;
         $client = static function (string $url, callable $onResult) use (&$fetches): void {
@@ -314,21 +319,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
             $onResult(null);
         };
 
-        $this->assertTrue(
-            (new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', $client))->downloadAndIndex(),
-            'losing the marker race was reported as an unusable cache directory',
-        );
-        $this->assertSame(0, $fetches, 'a second download started while another attempt owned the claim');
-        $this->assertSame(
-            [],
-            $this->refusalLines($log),
-            'losing a race to a SUCCESSFUL release was logged as an unusable cache directory',
-        );
-
-        // …and the once-per-process notice is still there for the case that
-        // genuinely needs it. This is the half the false positive used to eat:
-        // $refusalLogged latches, so ONE spurious refusal silenced every later
-        // real one in that worker for the rest of its life.
+        // The once-per-process notice, for the case that genuinely needs it.
         $unusable = $this->makeUnusableCacheDir();
 
         $this->assertFalse(
@@ -338,8 +329,105 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         $this->assertSame(0, $fetches, 'a download ran over a cache dir that can never hold the index');
 
         $lines = $this->refusalLines($log);
-        $this->assertCount(1, $lines, 'the genuine refusal was swallowed by the earlier false positive');
+        $this->assertCount(1, $lines, 'the genuine refusal was not reported');
         $this->assertStringContainsString($unusable, $lines[0], 'the notice does not name the unusable directory');
+
+        // Now the racy state, in the SAME process: it must be BUSY (true), not
+        // REFUSED (false), and it must not add a second "unusable cache
+        // directory" line — because it is not one.
+        $dir = $this->makeTmpDir();
+        mkdir($dir . '/title_index.download.lock', 0755);
+
+        $this->assertTrue(
+            (new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', $client))->downloadAndIndex(),
+            'losing the marker race was reported as an unusable cache directory',
+        );
+        $this->assertSame(0, $fetches, 'a second download started while another attempt owned the claim');
+        $this->assertCount(
+            1,
+            $this->refusalLines($log),
+            'losing a race to a SUCCESSFUL release was logged as an unusable cache directory',
+        );
+    }
+
+    #[RunInSeparateProcess]
+    #[PreserveGlobalState(false)]
+    #[DataProvider('blockedMarkerPathProvider')]
+    public function test_a_marker_path_that_is_not_a_regular_file_is_reported_not_silently_stalled(
+        string $shape,
+        string $expectedDescription,
+    ): void {
+        // SM-0.3a review (closing round), finding 2. When the marker PATH holds
+        // something that is not a regular file, `fopen(…,'x')` fails, is_file()
+        // is false and the probe correctly reports the DIRECTORY healthy — so
+        // the claim resolves to ACQUIRE_BUSY forever, because reclaimIfStale()
+        // is never reached and nothing ages the blocker out. Measured on the
+        // shipping file before this fix: 5 fresh indexers per state, every call
+        // returned true, 0 downloads ran and 0 log lines were written. The
+        // revision before the fail-closed work at least printed a line here.
+        //
+        // 0 downloads either way, so this is a diagnosability regression, not a
+        // functional one — which is exactly the shape that goes unnoticed for
+        // months. The state needs no permission bits (a plain mkdir/symlink), so
+        // it reproduces for every uid including root and this test cannot skip.
+        $log = $this->makeTmpDir() . '/error.log';
+        ini_set('error_log', $log);
+
+        $dir = $this->makeTmpDir();
+        $marker = $this->plantBlockedMarkerPath($dir, $shape);
+
+        $fetches = 0;
+        $client = static function (string $url, callable $onResult) use (&$fetches): void {
+            ++$fetches;
+            $onResult(null);
+        };
+
+        for ($i = 0; $i < 50; ++$i) {
+            $this->assertTrue(
+                (new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', $client))->downloadAndIndex(),
+                'a blocked marker path was reported as an unusable cache directory',
+            );
+        }
+
+        $this->assertSame(0, $fetches, 'a download ran while the marker path was unclaimable');
+
+        $lines = $this->stallLines($log);
+        $this->assertCount(1, $lines, '50 attempts over a blocked marker path did not log exactly once');
+        $this->assertStringContainsString($marker, $lines[0], 'the notice does not name the blocked marker path');
+        $this->assertStringContainsString(
+            $expectedDescription,
+            $lines[0],
+            'the notice does not say what is actually sitting at the marker path',
+        );
+        $this->assertStringContainsString(
+            'rm -rf',
+            $lines[0],
+            'the notice does not carry a recovery command that works — plain `rm` refuses a directory',
+        );
+        $this->assertSame(
+            [],
+            $this->refusalLines($log),
+            'a healthy cache directory was diagnosed as unusable',
+        );
+    }
+
+    /**
+     * Shapes of "not a regular file" that block the marker path.
+     *
+     * All three are built with core functions and no permission bits, so they
+     * bind every uid including root. One plant would not be coverage: a
+     * directory, a symlink resolving to one, and a symlink that resolves to
+     * nothing at all exercise three different stat outcomes.
+     *
+     * @return array<string, array{string, string}>
+     */
+    public static function blockedMarkerPathProvider(): array
+    {
+        return [
+            'a directory'              => ['dir', 'a directory'],
+            'a symlink to a directory' => ['link-to-dir', 'a symbolic link to'],
+            'a self-referential link'  => ['link-loop', 'a symbolic link to'],
+        ];
     }
 
     #[RunInSeparateProcess]
@@ -634,6 +722,50 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         ));
     }
 
+    /**
+     * The "STALLED …" notices written to a given error log so far.
+     *
+     * Deliberately a different prefix from {@see refusalLines()}: an unusable
+     * cache DIRECTORY and a blocked marker PATH are different conditions with
+     * different remedies, and the whole point of closing-round finding 2 is
+     * that each is named as itself.
+     *
+     * @return list<string>
+     */
+    private function stallLines(string $log): array
+    {
+        if (!is_file($log)) {
+            return [];
+        }
+
+        return array_values(array_filter(
+            (array) file($log),
+            static fn (string $line): bool => str_contains($line, 'TitleDumpIndexer: STALLED'),
+        ));
+    }
+
+    /**
+     * Put something that is not a regular file at the marker path.
+     *
+     * @param string $dir   Cache directory (healthy, and it stays healthy).
+     * @param string $shape One of the keys built in {@see blockedMarkerPathProvider()}.
+     *
+     * @return string The blocked marker path.
+     */
+    private function plantBlockedMarkerPath(string $dir, string $shape): string
+    {
+        $marker = $dir . '/title_index.download.lock';
+
+        match ($shape) {
+            'dir' => mkdir($marker, 0755),
+            'link-to-dir' => mkdir($dir . '/somewhere-else', 0755) && symlink($dir . '/somewhere-else', $marker),
+            'link-loop' => symlink($marker, $marker),
+            default => self::fail('unknown blocked-marker shape: ' . $shape),
+        };
+
+        return $marker;
+    }
+
     private function makeTmpDir(): string
     {
         $dir = sys_get_temp_dir() . '/anidb_sched_' . bin2hex(random_bytes(8));
@@ -673,6 +805,16 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         }
         foreach (array_diff((array) scandir($dir), ['.', '..']) as $file) {
             $path = $dir . '/' . $file;
+
+            // is_link() FIRST: is_dir() follows a symlink, so a link to a
+            // directory would otherwise send this into the target and then try
+            // to rmdir() the link itself. The blocked-marker-path fixtures plant
+            // exactly that.
+            if (is_link($path)) {
+                unlink($path);
+                continue;
+            }
+
             is_dir($path) ? $this->recursiveDelete($path) : unlink($path);
         }
         rmdir($dir);

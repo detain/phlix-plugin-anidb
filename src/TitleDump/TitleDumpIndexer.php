@@ -365,11 +365,29 @@ final class TitleDumpIndexer
         // it is only half true: a symlink pointing at an EXISTING file does make
         // the create fail (and leaves that file untouched), but PHP's plain-files
         // wrapper resolves the path first, so a planted DANGLING symlink is
-        // followed and the create lands on its target. Nothing is overwritten —
-        // the marker is zero bytes — but releaseInFlightMarker() would then
-        // unlink the target. No production exposure: the only writers of
-        // /var/cache/phlix/anidb are the service's own uid and root, and the
-        // sys_get_temp_dir() fallback is unit-private under PrivateTmp=true. It
+        // followed and the create lands on its target.
+        //
+        // What the redirect leaves behind was then MIS-stated as "release would
+        // unlink the target". It does not: `unlink(2)` does not follow symlinks.
+        // Driven through this class on the success path, so releaseInFlightMarker()
+        // actually ran: the LINK at the marker path is gone, and the file the
+        // redirect created SURVIVES (target exists=true, size=0). Nothing is ever
+        // overwritten either, because the marker is zero bytes. So the residual
+        // primitive is file CREATION at an attacker-chosen path — not deletion,
+        // and not corruption.
+        //
+        // `touch()` is the opposite, and it is the one that reaches an EXISTING
+        // file: it DOES follow a symlink, so a link planted at the marker path
+        // lets reclaimIfStale() clobber the target's mtime (measured: mtime
+        // moved from -86400 s to now, 16-byte content intact). The fstat/stat
+        // inode re-check there cannot stop it — both calls resolve through the
+        // link to the SAME target inode (measured: fstat.ino == stat.ino; only
+        // lstat sees the link's own inode).
+        //
+        // No production exposure, verified read-only on the box: /var/cache/phlix
+        // is root:root 0755 and /var/cache/phlix/anidb is phlix:phlix 0755, so
+        // the only writers are the service's own uid and root; the
+        // sys_get_temp_dir() fallback is unit-private under PrivateTmp=yes. It
         // would matter if PHLIX_ANIDB_CACHE_DIR were ever pointed somewhere
         // world-writable, which it must not be.
         $handle = @fopen($marker, 'x');
@@ -438,9 +456,16 @@ final class TitleDumpIndexer
             if (!is_file($marker)) {
                 // Absent, and two atomic creates failed. Either the directory
                 // cannot hold the marker, or a third racer is churning it.
-                return $this->cacheDirAcceptsAFile()
-                    ? self::ACQUIRE_BUSY
-                    : self::ACQUIRE_REFUSED;
+                if (!$this->cacheDirAcceptsAFile()) {
+                    return self::ACQUIRE_REFUSED;
+                }
+
+                // The directory is healthy, so ordinary contention is the
+                // expected answer — but it is not the only one that lands here,
+                // and the other one never resolves itself. See below.
+                $this->reportBlockedMarkerPath($marker);
+
+                return self::ACQUIRE_BUSY;
             }
         }
 
@@ -480,6 +505,109 @@ final class TitleDumpIndexer
         @unlink($probe);
 
         return true;
+    }
+
+    /**
+     * Tell an operator, once per process, that the marker PATH is blocked by
+     * something that is not a regular file.
+     *
+     * ┌── SM-0.3a review (closing round), finding 2 — DO NOT MAKE THIS SILENT ┐
+     * │ When the marker PATH holds a directory, a FIFO, a socket or a symlink │
+     * │ then `fopen(..., 'x')` fails, `is_file()` is false (none of those is  │
+     * │ a regular file) and cacheDirAcceptsAFile() correctly reports the      │
+     * │ DIRECTORY healthy — so the claim resolves to ACQUIRE_BUSY. Forever:   │
+     * │ reclaimIfStale() is never reached, so nothing ages the blocker out.   │
+     * │ Measured, 5 fresh indexers per state (directory / FIFO / symlink to a │
+     * │ directory): every call returned true — "scheduled or already fine" —  │
+     * │ while 0 downloads ran and NOT ONE line was logged. The revision       │
+     * │ before the fail-closed work at least printed a REFUSING line here; it │
+     * │ named the wrong cause, but it was loud. Trading a wrong-but-loud      │
+     * │ diagnosis for a silent permanent stall is a bad trade in an estate    │
+     * │ that has repeatedly been burned by subsystems that fail quietly.      │
+     * │                                                                       │
+     * │ This reports and does NOT change the return value: it is not a        │
+     * │ functional regression (0 downloads either way, and neither version    │
+     * │ self-heals), and nothing in Phlix can create the state — it takes an  │
+     * │ operator `mkdir`, a restore artifact or a planted symlink.            │
+     * │                                                                       │
+     * │ WHY lstat IS THE SOUND TEST. This branch is ALSO the ordinary release │
+     * │ race (a racer created and released the marker between the two stats), │
+     * │ and that must stay silent — by this estate's own rule, a notice that  │
+     * │ fires while everything is working gets ignored, and this one shares   │
+     * │ the once-per-process budget a genuine refusal needs. The              │
+     * │ discriminator is not a guess: in the race the path is genuinely       │
+     * │ ABSENT, so lstat fails, whereas a blocked path is one lstat can see.  │
+     * │ filetype() is lstat-based, so a symlink reports "link" rather than    │
+     * │ its target's type — exactly the distinction wanted here. A racer that │
+     * │ re-created the marker as a regular file in the meantime is contention │
+     * │ too, hence the 'file' case. This class only ever puts a REGULAR file  │
+     * │ at that path, so no Phlix code path can trip the notice.              │
+     * └───────────────────────────────────────────────────────────────────────┘
+     *
+     * Shares {@see $refusalLogged} with {@see reportUnusableCacheDir()} on
+     * purpose: both describe a permanently stalled title dump, an operator
+     * needs at most one such line per worker, and on a single cache directory
+     * the two states are mutually exclusive — a directory that cannot hold the
+     * marker cannot hold a blocker at the marker path either. A second latch
+     * would only be a second way to fill the log.
+     *
+     * @param string $marker Absolute path of the marker that could not be created.
+     */
+    private function reportBlockedMarkerPath(string $marker): void
+    {
+        clearstatcache(true, $marker);
+
+        $type = @filetype($marker);
+
+        if ($type === false || $type === 'file') {
+            // Genuinely absent (the release race this branch exists for), or a
+            // racer re-created it as a regular file. Both are contention.
+            return;
+        }
+
+        if (self::$refusalLogged) {
+            return;
+        }
+
+        self::$refusalLogged = true;
+
+        error_log(sprintf(
+            'TitleDumpIndexer: STALLED — the AniDB title-dump in-flight marker "%s" is %s, not a '
+            . 'regular file, so no worker can ever claim it and the title dump will never update '
+            . 'again. The cache directory "%s" itself is healthy, and nothing in Phlix creates this '
+            . 'state (it takes an operator mkdir, a restore artifact or a planted symlink). Recover '
+            . 'with: rm -rf "%s" — plain `rm` refuses a directory. Logged once per process.',
+            $marker,
+            $this->describeMarkerType($type, $marker),
+            $this->cacheDir,
+            $marker,
+        ));
+    }
+
+    /**
+     * Human-readable rendering of an lstat file type, for the notice above.
+     *
+     * @param string $type   A {@see filetype()} result other than 'file'.
+     * @param string $marker Absolute path, used to resolve a symlink's target.
+     */
+    private function describeMarkerType(string $type, string $marker): string
+    {
+        if ($type === 'link') {
+            $target = @readlink($marker);
+
+            return $target === false
+                ? 'a symbolic link'
+                : sprintf('a symbolic link to "%s"', $target);
+        }
+
+        return match ($type) {
+            'dir'    => 'a directory',
+            'fifo'   => 'a FIFO (named pipe)',
+            'socket' => 'a socket',
+            'block'  => 'a block device',
+            'char'   => 'a character device',
+            default  => 'a ' . $type,
+        };
     }
 
     /**
@@ -528,7 +656,10 @@ final class TitleDumpIndexer
      * │ sys_get_temp_dir() fallback is unit-private under PrivateTmp=true.   │
      * │ It matters the day PHLIX_ANIDB_CACHE_DIR is pointed at a network or  │
      * │ FUSE mount — recover with                                            │
-     * │ `rm /var/cache/phlix/anidb/title_index.download.lock`.               │
+     * │ `rm -rf /var/cache/phlix/anidb/title_index.download.lock`. The `-rf`  │
+     * │ is not decoration: the marker path can also be blocked by a          │
+     * │ DIRECTORY or a foreign-uid file, and plain `rm` refuses both — see   │
+     * │ {@see reportBlockedMarkerPath()}.                                    │
      * └──────────────────────────────────────────────────────────────────────┘
      *
      * @param string $marker Absolute path to the existing marker file.

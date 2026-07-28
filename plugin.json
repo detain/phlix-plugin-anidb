@@ -1,6 +1,6 @@
 {
     "name": "phlix-plugin-anidb",
-    "version": "0.4.0",
+    "version": "0.4.1",
     "phlix_min_server_version": "1.2.0",
     "type": "metadata-provider",
     "entry": "Phlix\\Anidb\\AnidbMetadataProvider",
@@ -36,10 +36,10 @@
         "title_dump_url": {
             "type": "string",
             "required": false,
-            "default": "http://anidb.net/api/anime-titles.dat.gz",
+            "default": "https://anidb.net/api/anime-titles.dat.gz",
             "tier": "advanced",
             "label": "Title Dump URL",
-            "description": "Source URL for the anime-titles.dat.gz file. Optional — change only if using a mirror."
+            "description": "Source URL for the anime-titles.dat.gz file. Optional — change only if using a mirror. Must be https: AniDB is behind Cloudflare, which answers the plain-http URL with 403 and leaves the offline index empty."
         }
     },
     "signature": null

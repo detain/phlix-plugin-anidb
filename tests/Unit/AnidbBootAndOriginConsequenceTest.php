@@ -29,6 +29,37 @@ final class AnidbBootAndOriginConsequenceTest extends TestCase
         'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
     ];
 
+    /**
+     * Per-run cache dir for the title-dump manager.
+     *
+     * This used to be the fixed path `sys_get_temp_dir()/anidb-boot-io-test`.
+     * Since SM-0.3a a failed download deliberately leaves its in-flight marker
+     * behind as a retry floor, so a fixed path made the suite's behaviour
+     * depend on wall-clock and on litter from a previous run: the first run
+     * inside a 120 s window took the download branch and later runs took the
+     * marker-blocked branch. Nothing asserted on it, which is precisely the
+     * shape that becomes a flake later. A unique directory per run plus
+     * {@see tearDown()} removes both the coupling and the litter.
+     */
+    private string $cacheDir;
+
+    protected function setUp(): void
+    {
+        $this->cacheDir = sys_get_temp_dir() . '/anidb-boot-io-test-' . bin2hex(random_bytes(8));
+    }
+
+    protected function tearDown(): void
+    {
+        if (!is_dir($this->cacheDir)) {
+            return;
+        }
+
+        foreach (array_diff((array) scandir($this->cacheDir), ['.', '..']) as $entry) {
+            @unlink($this->cacheDir . '/' . $entry);
+        }
+        @rmdir($this->cacheDir);
+    }
+
     // -------------------------------------------------------------------------
     // BOOT I/O — onEnable() must do ZERO network I/O (item-5c3 landmine)
     // -------------------------------------------------------------------------
@@ -44,7 +75,7 @@ final class AnidbBootAndOriginConsequenceTest extends TestCase
 
         // A title-dump manager whose download/load MUST NOT be triggered at boot.
         $titleDump = new TitleDumpManager(
-            sys_get_temp_dir() . '/anidb-boot-io-test',
+            $this->cacheDir,
             self::SETTINGS['title_dump_url'],
         );
 

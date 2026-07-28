@@ -15,6 +15,7 @@ use Phlix\Anidb\Parser\EpisodeExtractor;
 use Phlix\Anidb\Parser\FilenameTitleExtractor;
 use Phlix\Anidb\TitleDump\TitleDumpIndexer;
 use Phlix\Anidb\TitleDump\TitleDumpManager;
+use Phlix\Anidb\TitleDump\TitleDumpUrlMigration;
 use Phlix\Anidb\Udp\ProductionWaiter;
 use Phlix\Anidb\Udp\SocketUdpClient;
 use Phlix\Anidb\Udp\UdpClient;
@@ -42,7 +43,8 @@ use Psr\Container\ContainerInterface;
  * - username: AniDB username (required)
  * - api_key: AniDB API password from profile (required, secret)
  * - use_title_dump: whether to download/use title dump (default: true)
- * - title_dump_url: URL to anime-titles.dat.gz (default: AniDB official)
+ * - title_dump_url: URL to anime-titles.dat.gz (default: AniDB official, https —
+ *   a stored plain-http AniDB URL is migrated by {@see TitleDumpUrlMigration})
  *
  * ## Protocol notes
  *
@@ -217,7 +219,31 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         ?UdpClient $udpSession = null,
         ?string $cacheDir = null,
     ) {
+        // One-shot fix-up of a stored `title_dump_url` (SM-0.3). This is the
+        // single choke point through which the host delivers persisted
+        // settings, and it MUST run here rather than relying on the manifest
+        // default alone: the loader merges array_merge($defaults, $stored), so
+        // an install that already persisted the dead
+        // `http://anidb.net/api/anime-titles.dat.gz` (403 from Cloudflare, hence
+        // a 2-byte title_index.json) would keep it forever. Pure string work —
+        // no I/O, safe in a resident-memory worker constructor.
+        $configuredDumpUrl = $settings['title_dump_url'] ?? null;
+        $effectiveDumpUrl = TitleDumpUrlMigration::resolve($configuredDumpUrl);
+        if (
+            is_string($configuredDumpUrl)
+            && trim($configuredDumpUrl) !== ''
+            && $configuredDumpUrl !== $effectiveDumpUrl
+        ) {
+            error_log(sprintf(
+                'AnidbMetadataProvider: migrated stored title_dump_url "%s" -> "%s" '
+                . '(AniDB answers plain http with 403)',
+                $configuredDumpUrl,
+                $effectiveDumpUrl,
+            ));
+        }
+
         $this->settings = $settings;
+        $this->settings['title_dump_url'] = $effectiveDumpUrl;
         $this->cacheDir = $this->resolveCacheDir($settings, $cacheDir);
         $this->udpClient = $udpClient ?? new SocketUdpClient(
             self::API_HOST,

@@ -48,7 +48,7 @@ Configure these in the Phlix admin **Plugins → Configure** dialog.
 | `username` | string | **Yes** | — | Your AniDB account username. [Register free](https://anidb.net/). |
 | `api_key` | string (secret) | **Yes** | — | The UDP **API Key** (API password) set in your AniDB profile under Settings → Account → API — separate from your login password. See the [AniDB API docs](https://anidb.net/software/api). |
 | `use_title_dump` | boolean | No | `true` | Download the daily title dump for fast, offline search (reduces rate-limited API calls). |
-| `title_dump_url` | string | No | AniDB official | URL to `anime-titles.dat.gz`; change only for a mirror. |
+| `title_dump_url` | string | No | `https://anidb.net/api/anime-titles.dat.gz` | URL to `anime-titles.dat.gz`; change only for a mirror. Must be **https** — AniDB's Cloudflare front answers plain http with 403, so an http URL silently leaves the offline index empty. A stored `http://…anidb.net/…` value from before 0.4.1 is migrated to https automatically. |
 
 > The AniDB UDP API authenticates with your **username** + a separate **API Key** you set in your
 > profile (not your website login password). Set the API Key under

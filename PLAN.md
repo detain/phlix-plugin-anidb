@@ -53,7 +53,7 @@ phlix-plugin-anidb/
   - `username` (string, required) — AniDB username
   - `api_key` (string, required, secret) — AniDB API password (NOT the website password; see API docs)
   - `use_title_dump` (bool, default: true) — whether to download/use the title dump for search
-  - `title_dump_url` (string, default: `http://anidb.net/api/anime-titles.dat.gz`) — title dump URL
+  - `title_dump_url` (string, default: `https://anidb.net/api/anime-titles.dat.gz`) — title dump URL
 
 ---
 
@@ -157,7 +157,8 @@ Response 243:
 
 ### 2.5 Title Dump (`anime-titles.dat.gz`)
 
-**URL:** `http://anidb.net/api/anime-titles.dat.gz`
+**URL:** `https://anidb.net/api/anime-titles.dat.gz` (https only — Cloudflare answers the
+plain-http URL with 403, which is why the index shipped empty until 0.4.1)
 **Update frequency:** Daily (download max once per day)
 **Format:** pipe-delimited, gzip-compressed:
 
@@ -483,7 +484,7 @@ onEnable(ContainerInterface $container):
 
 - [AniDB UDP API Definition](https://wiki.anidb.net/UDP_API_Definition)
 - [AniDB API Overview](https://wiki.anidb.net/API)
-- [AniDB Anime Titles Dump](http://anidb.net/api/anime-titles.dat.gz)
+- [AniDB Anime Titles Dump](https://anidb.net/api/anime-titles.dat.gz)
 - [anisearch.outrance.pl](http://anisearch.outrance.pl/) — HTTP wrapper for title search
 - [phlix-plugin-example](https://github.com/detain/phlix-plugin-example) — reference plugin
 - [phlix-server MetadataManager](file://src/Media/Metadata/MetadataManager.php) — host integration

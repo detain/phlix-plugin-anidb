@@ -154,4 +154,108 @@ final class AnidbMetadataProviderAdapterTest extends TestCase
         $ref->invoke($provider, $container);
         $this->addToAssertionCount(1);
     }
+
+    public function test_get_images_with_whitespace_aid_returns_empty(): void
+    {
+        $adapter = new AnidbMetadataProviderAdapter($this->makeProvider());
+
+        $this->assertSame([], $adapter->getImages('   '));
+    }
+
+    public function test_get_details_with_zero_aid_returns_empty(): void
+    {
+        $adapter = new AnidbMetadataProviderAdapter($this->makeProvider());
+
+        $this->assertSame([], $adapter->getDetails('0'));
+    }
+
+    public function test_get_images_with_zero_aid_returns_empty(): void
+    {
+        $adapter = new AnidbMetadataProviderAdapter($this->makeProvider());
+
+        $this->assertSame([], $adapter->getImages('0'));
+    }
+
+    public function test_parse_aid_rejects_negative_numbers(): void
+    {
+        $adapter = new AnidbMetadataProviderAdapter($this->makeProvider());
+
+        // Negative number strings are rejected by parseAid
+        $this->assertSame([], $adapter->getDetails('-1'));
+        $this->assertSame([], $adapter->getImages('-1'));
+    }
+
+    public function test_parse_aid_rejects_non_numeric_strings(): void
+    {
+        $adapter = new AnidbMetadataProviderAdapter($this->makeProvider());
+
+        $this->assertSame([], $adapter->getDetails('abc'));
+        $this->assertSame([], $adapter->getImages('abc'));
+    }
+
+    public function test_parse_aid_accepts_valid_positive_integer_strings(): void
+    {
+        // Use reflection to test parseAid directly since we can't mock the provider
+        $adapter = new AnidbMetadataProviderAdapter($this->makeProvider());
+
+        $ref = new \ReflectionClass(AnidbMetadataProviderAdapter::class);
+        $method = $ref->getMethod('parseAid');
+        $method->setAccessible(true);
+
+        // Valid cases - positive integers should parse correctly
+        $this->assertSame(1, $method->invoke($adapter, '1'));
+        $this->assertSame(12345, $method->invoke($adapter, '12345'));
+        $this->assertSame(999999, $method->invoke($adapter, '999999'));
+    }
+
+    public function test_parse_aid_rejects_invalid_inputs(): void
+    {
+        $adapter = new AnidbMetadataProviderAdapter($this->makeProvider());
+
+        $ref = new \ReflectionClass(AnidbMetadataProviderAdapter::class);
+        $method = $ref->getMethod('parseAid');
+        $method->setAccessible(true);
+
+        // Invalid cases
+        $this->assertNull($method->invoke($adapter, ''));
+        $this->assertNull($method->invoke($adapter, '   '));
+        $this->assertNull($method->invoke($adapter, '0'));
+        $this->assertNull($method->invoke($adapter, '-1'));
+        $this->assertNull($method->invoke($adapter, '1.5'));
+        $this->assertNull($method->invoke($adapter, '1a'));
+        $this->assertNull($method->invoke($adapter, 'a1'));
+    }
+
+    public function test_string_or_returns_value_when_non_empty_string(): void
+    {
+        $adapter = new AnidbMetadataProviderAdapter($this->makeProvider());
+
+        $ref = new \ReflectionClass(AnidbMetadataProviderAdapter::class);
+        $method = $ref->getMethod('stringOr');
+        $method->setAccessible(true);
+
+        $this->assertSame('actual value', $method->invoke($adapter, 'actual value', 'fallback'));
+    }
+
+    public function test_string_or_returns_fallback_when_value_is_null(): void
+    {
+        $adapter = new AnidbMetadataProviderAdapter($this->makeProvider());
+
+        $ref = new \ReflectionClass(AnidbMetadataProviderAdapter::class);
+        $method = $ref->getMethod('stringOr');
+        $method->setAccessible(true);
+
+        $this->assertSame('fallback', $method->invoke($adapter, null, 'fallback'));
+    }
+
+    public function test_string_or_returns_fallback_when_value_is_empty_string(): void
+    {
+        $adapter = new AnidbMetadataProviderAdapter($this->makeProvider());
+
+        $ref = new \ReflectionClass(AnidbMetadataProviderAdapter::class);
+        $method = $ref->getMethod('stringOr');
+        $method->setAccessible(true);
+
+        $this->assertSame('fallback', $method->invoke($adapter, '', 'fallback'));
+    }
 }

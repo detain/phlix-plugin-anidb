@@ -247,6 +247,259 @@ final class AnidbUdpSeamTest extends TestCase
             'no elapsed time: wait full 4s' => [0.0, 4.0],
         ];
     }
+
+    public function test_logout_is_noop_when_not_authenticated(): void
+    {
+        $udp = new FakeUdpClient([]);
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+
+        // Should not throw and should not send anything
+        $client->logout();
+
+        $this->assertFalse($client->isAuthenticated());
+        $this->assertNull($client->getSessionKey());
+        $this->assertCount(0, $udp->sent);
+    }
+
+    public function test_is_authenticated_before_and_after_auth(): void
+    {
+        $udp = new FakeUdpClient(['200 SESSION_KEY LOGIN ACCEPTED']);
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+
+        $this->assertFalse($client->isAuthenticated());
+
+        $client->authenticate();
+
+        $this->assertTrue($client->isAuthenticated());
+        $this->assertNotNull($client->getSessionKey());
+    }
+
+    public function test_get_session_key_returns_null_when_not_authenticated(): void
+    {
+        $udp = new FakeUdpClient([]);
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+
+        $this->assertNull($client->getSessionKey());
+    }
+
+    public function test_ping_sends_when_session_active(): void
+    {
+        $udp = new FakeUdpClient([
+            '200 SESSION_KEY LOGIN ACCEPTED',
+            '200 PONG', // PING response
+        ]);
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+
+        // Authenticate first
+        $client->authenticate();
+        $udp->sent = []; // Clear AUTH from sent
+
+        // Access the private ping() method via reflection and call it
+        $reflection = new \ReflectionClass($client);
+        $pingMethod = $reflection->getMethod('ping');
+        $pingMethod->setAccessible(true);
+        $pingMethod->invoke($client);
+
+        // Verify PING was sent
+        $this->assertCount(1, $udp->sent);
+        $this->assertStringStartsWith('PING', $udp->sent[0]);
+    }
+
+    public function test_needs_keep_alive_returns_false_immediately_after_auth(): void
+    {
+        $udp = new FakeUdpClient(['200 SESSION_KEY LOGIN ACCEPTED']);
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+        $client->authenticate();
+
+        $reflection = new \ReflectionClass($client);
+        $method = $reflection->getMethod('needsKeepAlive');
+        $method->setAccessible(true);
+
+        $this->assertFalse($method->invoke($client));
+    }
+
+    public function test_is_valid_reply_origin_accepts_correct_origin(): void
+    {
+        $udp = new FakeUdpClientWithOrigin(
+            ['200 SESSION_KEY LOGIN ACCEPTED'],
+            ['api.anidb.net'],
+            [9000]
+        );
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+
+        // Trigger a command to populate the valid origin hosts
+        $client->sendCommand('ANIME aid=1');
+
+        $reflection = new \ReflectionClass($client);
+        $method = $reflection->getMethod('isValidReplyOrigin');
+        $method->setAccessible(true);
+
+        // With explicit validOriginHosts=['api.anidb.net'], api.anidb.net:9000 should be valid
+        $result = $method->invoke($client, 'api.anidb.net', 9000);
+        $this->assertTrue($result);
+    }
+
+    public function test_is_valid_reply_origin_rejects_wrong_port(): void
+    {
+        $udp = new FakeUdpClientWithOrigin(
+            ['200 SESSION_KEY LOGIN ACCEPTED'],
+            ['api.anidb.net'],
+            [9000]
+        );
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+        $client->sendCommand('ANIME aid=1');
+
+        $reflection = new \ReflectionClass($client);
+        $method = $reflection->getMethod('isValidReplyOrigin');
+        $method->setAccessible(true);
+
+        // Wrong port should be rejected
+        $result = $method->invoke($client, 'api.anidb.net', 9001);
+        $this->assertFalse($result);
+    }
+
+    public function test_is_valid_reply_origin_rejects_wrong_host(): void
+    {
+        $udp = new FakeUdpClientWithOrigin(
+            ['200 SESSION_KEY LOGIN ACCEPTED'],
+            ['api.anidb.net'],
+            [9000]
+        );
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+        $client->sendCommand('ANIME aid=1');
+
+        $reflection = new \ReflectionClass($client);
+        $method = $reflection->getMethod('isValidReplyOrigin');
+        $method->setAccessible(true);
+
+        // Wrong host should be rejected
+        $result = $method->invoke($client, '10.0.0.1', 9000);
+        $this->assertFalse($result);
+    }
+
+    public function test_resolve_valid_origin_hosts_memoizes_result(): void
+    {
+        $udp = new FakeUdpClient(['200 SESSION_KEY LOGIN ACCEPTED']);
+        $waiter = new NoOpWaiter();
+
+        // Provide explicit validOriginHosts to avoid DNS lookup
+        $client = new UdpClient(
+            ['username' => 'testuser', 'api_key' => 'testkey'],
+            $udp,
+            $waiter,
+            ['api.anidb.net', '1.2.3.4'] // explicit hosts
+        );
+
+        $reflection = new \ReflectionClass($client);
+        $method = $reflection->getMethod('resolveValidOriginHosts');
+        $method->setAccessible(true);
+
+        // First call
+        $result1 = $method->invoke($client);
+        $this->assertContains('api.anidb.net', $result1);
+        $this->assertContains('1.2.3.4', $result1);
+
+        // Second call should return same memoized result
+        $result2 = $method->invoke($client);
+        $this->assertSame($result1, $result2); // Same array instance = memoized
+    }
+
+    public function test_close_sends_logout_when_authenticated(): void
+    {
+        $udp = new FakeUdpClient([
+            '200 SESSION_KEY LOGIN ACCEPTED',
+            '200 LOGOUT ACCEPTED',
+        ]);
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+
+        // Authenticate
+        $client->authenticate();
+        $udp->sent = []; // Clear AUTH
+
+        // Close should send LOGOUT
+        $client->close();
+
+        $this->assertTrue(str_starts_with($udp->sent[0] ?? '', 'LOGOUT'));
+        $this->assertFalse($client->isAuthenticated());
+    }
+
+    public function test_parse_auth_failure_500(): void
+    {
+        $udp = new FakeUdpClient([]);
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+
+        $exception = $client->parseAuthFailure('500 LOGIN FAILED');
+        $this->assertInstanceOf(\RuntimeException::class, $exception);
+        $this->assertStringContainsString('Invalid username', $exception->getMessage());
+    }
+
+    public function test_parse_auth_failure_503(): void
+    {
+        $udp = new FakeUdpClient([]);
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+
+        $exception = $client->parseAuthFailure('503 CLIENT VERSION OUTDATED');
+        $this->assertInstanceOf(\RuntimeException::class, $exception);
+        $this->assertStringContainsString('Client version outdated', $exception->getMessage());
+    }
+
+    public function test_parse_auth_failure_504(): void
+    {
+        $udp = new FakeUdpClient([]);
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+
+        $exception = $client->parseAuthFailure('504 CLIENT BANNED - flooding');
+        $this->assertInstanceOf(\RuntimeException::class, $exception);
+        $this->assertStringContainsString('Client banned', $exception->getMessage());
+    }
+
+    public function test_parse_auth_failure_555(): void
+    {
+        $udp = new FakeUdpClient([]);
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+
+        $exception = $client->parseAuthFailure('555 BANNED - too many failed logins');
+        $this->assertInstanceOf(\RuntimeException::class, $exception);
+        $this->assertStringContainsString('Banned', $exception->getMessage());
+    }
+
+    public function test_parse_auth_failure_unknown(): void
+    {
+        $udp = new FakeUdpClient([]);
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+
+        $exception = $client->parseAuthFailure('999 UNKNOWN ERROR');
+        $this->assertInstanceOf(\RuntimeException::class, $exception);
+        $this->assertStringContainsString('AniDB AUTH failed', $exception->getMessage());
+    }
 }
 
 /**

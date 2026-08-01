@@ -228,7 +228,8 @@ final class TitleDumpIndexerMethodsTest extends TestCase
             $method = $reflection->getMethod('writeIndex');
             $method->setAccessible(true);
 
-            $result = $method->invoke($indexer, [['aid' => 1, 'titles' => []]]);
+            // Suppress the expected PHP warning from file_put_contents permission denied
+            $result = @$method->invoke($indexer, [['aid' => 1, 'titles' => []]]);
 
             $this->assertFalse($result);
         } finally {

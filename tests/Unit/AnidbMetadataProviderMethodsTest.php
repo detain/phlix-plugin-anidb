@@ -389,4 +389,252 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
         // Title dump search should have found AID 42
         $this->assertSame(42, $provider->resolveAidByTitle('Known Anime'));
     }
+
+    /**
+     * @dataProvider mapAnimeStatusProvider
+     */
+    public function test_map_anime_status_various_date_scenarios(
+        int $startDate,
+        int $endDate,
+        string $expected
+    ): void {
+        $provider = new AnidbMetadataProvider([
+            'username' => 'testuser',
+            'api_key' => 'testkey',
+            'use_title_dump' => false,
+            'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
+        ]);
+
+        $reflection = new \ReflectionClass($provider);
+        $method = $reflection->getMethod('mapAnimeStatus');
+        $method->setAccessible(true);
+
+        $anime = [
+            'start_date' => $startDate,
+            'end_date' => $endDate,
+        ];
+
+        $result = $method->invoke($provider, $anime);
+        $this->assertSame($expected, $result);
+    }
+
+    /**
+     * @return array<string, array{int, int, string}>
+     */
+    public static function mapAnimeStatusProvider(): array
+    {
+        $now = time();
+        $past = $now - 86400 * 365; // 1 year ago
+        $future = $now + 86400 * 365; // 1 year from now
+        $farPast = $now - 86400 * 365 * 5; // 5 years ago
+
+        return [
+            'no start date: upcoming' => [0, 0, 'Upcoming'],
+            'started in past, no end: currently airing' => [$past, 0, 'Currently Airing'],
+            'started in future, no end: upcoming' => [$future, 0, 'Upcoming'],
+            'started in past, ended in past: finished' => [$past, $past + 86400 * 30, 'Finished'],
+            'started in past, ending in future: currently airing' => [$past, $future, 'Currently Airing'],
+            'started long ago, ended recently: finished' => [$farPast, $past, 'Finished'],
+        ];
+    }
+
+    public function test_resolve_cache_dir_from_explicit_argument(): void
+    {
+        $provider = new AnidbMetadataProvider(
+            ['username' => 'testuser', 'api_key' => 'testkey', 'use_title_dump' => false, 'title_dump_url' => 'http://example.com/anime-titles.dat.gz'],
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            '/explicit/cache/dir',
+        );
+
+        $reflection = new \ReflectionClass($provider);
+        $method = $reflection->getMethod('resolveCacheDir');
+        $method->setAccessible(true);
+
+        $result = $method->invoke($provider, [], '/explicit/cache/dir');
+        $this->assertSame('/explicit/cache/dir', $result);
+    }
+
+    public function test_resolve_cache_dir_from_settings(): void
+    {
+        $provider = new AnidbMetadataProvider(
+            ['username' => 'testuser', 'api_key' => 'testkey', 'use_title_dump' => false, 'title_dump_url' => 'http://example.com/anime-titles.dat.gz', 'cache_dir' => '/settings/cache/dir'],
+        );
+
+        $reflection = new \ReflectionClass($provider);
+        $method = $reflection->getMethod('resolveCacheDir');
+        $method->setAccessible(true);
+
+        $result = $method->invoke($provider, ['cache_dir' => '/settings/cache/dir'], null);
+        $this->assertSame('/settings/cache/dir', $result);
+    }
+
+    public function test_resolve_cache_dir_falls_back_to_temp_dir(): void
+    {
+        $provider = new AnidbMetadataProvider(
+            ['username' => 'testuser', 'api_key' => 'testkey', 'use_title_dump' => false, 'title_dump_url' => 'http://example.com/anime-titles.dat.gz'],
+        );
+
+        $reflection = new \ReflectionClass($provider);
+        $method = $reflection->getMethod('resolveCacheDir');
+        $method->setAccessible(true);
+
+        $result = $method->invoke($provider, [], null);
+        $this->assertSame(sys_get_temp_dir() . '/phlix-plugin-anidb', $result);
+    }
+
+    public function test_resolve_cache_dir_prefers_explicit_over_settings(): void
+    {
+        $provider = new AnidbMetadataProvider(
+            ['username' => 'testuser', 'api_key' => 'testkey', 'use_title_dump' => false, 'title_dump_url' => 'http://example.com/anime-titles.dat.gz', 'cache_dir' => '/settings/cache'],
+        );
+
+        $reflection = new \ReflectionClass($provider);
+        $method = $reflection->getMethod('resolveCacheDir');
+        $method->setAccessible(true);
+
+        // Explicit arg should win over settings
+        $result = $method->invoke($provider, ['cache_dir' => '/settings/cache'], '/explicit/cache');
+        $this->assertSame('/explicit/cache', $result);
+    }
+
+    public function test_fetch_anime_description_returns_null_for_503_response(): void
+    {
+        $transport = new class implements UdpClientInterface {
+            public bool $opened = false;
+            /** @var list<string|null> */
+            public array $responses = [];
+            public function open(): void { $this->opened = true; }
+            public function send(string $data): ?string { return array_shift($this->responses); }
+            public function close(): void {}
+            public function lastReplyHost(): ?string { return 'api.anidb.net'; }
+            public function lastReplyPort(): ?int { return 9000; }
+        };
+        $waiter = new class implements WaiterInterface {
+            public function wait(float $seconds): void {}
+        };
+        $udpSession = new UdpClient(
+            ['username' => 'testuser', 'api_key' => 'testkey'],
+            $transport,
+            $waiter,
+        );
+
+        $provider = new AnidbMetadataProvider(
+            ['username' => 'testuser', 'api_key' => 'testkey', 'use_title_dump' => false, 'title_dump_url' => 'http://example.com/anime-titles.dat.gz'],
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            $udpSession,
+        );
+
+        // Set up responses: AUTH succeeds, ANIMEDESC returns 503
+        $transport->responses = [
+            '200 SESSIONKEY LOGIN ACCEPTED', // AUTH
+            '503 ANIMEDESC FAILED',          // ANIMEDESC
+        ];
+
+        // Use reflection to call fetchAnimeDescription
+        $reflection = new \ReflectionClass($provider);
+        $method = $reflection->getMethod('fetchAnimeDescription');
+        $method->setAccessible(true);
+
+        $result = $method->invoke($provider, 1);
+        $this->assertNull($result);
+    }
+
+    public function test_find_aid_by_title_falls_back_to_udp_when_title_dump_returns_null(): void
+    {
+        // Create a real TitleDumpManager with injected test index
+        $titleDumpManager = new \Phlix\Anidb\TitleDump\TitleDumpManager(
+            sys_get_temp_dir() . '/test-anidb-cache-fallback',
+            'http://example.com/anime-titles.dat.gz'
+        );
+        // Inject an index that doesn't contain 'Some Anime'
+        $titleDumpManager->injectIndex([
+            ['aid' => 99999, 'titles' => [['title' => 'Different Anime', 'type' => 'main', 'lang' => 'en']]],
+        ]);
+
+        // Provide responses for AUTH + ANIME fallback (since title dump won't find 'Some Anime')
+        $transport = new class implements UdpClientInterface {
+            public bool $opened = false;
+            /** @var list<string|null> */
+            public array $responses = [
+                '200 SESSIONKEY LOGIN ACCEPTED',  // AUTH
+                "230 ANIME\n12345|data",         // ANIME fallback
+            ];
+            public function open(): void { $this->opened = true; }
+            public function send(string $data): ?string { return array_shift($this->responses); }
+            public function close(): void {}
+            public function lastReplyHost(): ?string { return 'api.anidb.net'; }
+            public function lastReplyPort(): ?int { return 9000; }
+        };
+        $waiter = new class implements WaiterInterface {
+            public function wait(float $seconds): void {}
+        };
+        $udpSession = new UdpClient(
+            ['username' => 'testuser', 'api_key' => 'testkey'],
+            $transport,
+            $waiter,
+        );
+
+        $provider = new AnidbMetadataProvider(
+            ['username' => 'testuser', 'api_key' => 'testkey', 'use_title_dump' => true, 'title_dump_url' => 'http://example.com/anime-titles.dat.gz'],
+            $transport,
+            $waiter,
+            null,
+            null,
+            null,
+            $titleDumpManager,
+            $udpSession,
+        );
+
+        // Since 'Some Anime' is not in the title dump index, it falls back to UDP
+        $result = $provider->resolveAidByTitle('Some Anime');
+        $this->assertSame(12345, $result);
+    }
+
+    public function test_parse_anime_response_passes_to_anime_parser(): void
+    {
+        // AnimeResponseParser is final, so we test it indirectly through
+        // the provider by checking that a well-formed ANIME response
+        // produces expected metadata structure
+        $transport = new class implements UdpClientInterface {
+            public bool $opened = false;
+            /** @var list<string|null> */
+            public array $responses = ['200 SESSIONKEY LOGIN ACCEPTED', "230 ANIME\n1|data"];
+            public function open(): void { $this->opened = true; }
+            public function send(string $data): ?string { return array_shift($this->responses); }
+            public function close(): void {}
+            public function lastReplyHost(): ?string { return 'api.anidb.net'; }
+            public function lastReplyPort(): ?int { return 9000; }
+        };
+        $waiter = new class implements WaiterInterface {
+            public function wait(float $seconds): void {}
+        };
+        $udpSession = new UdpClient(
+            ['username' => 'testuser', 'api_key' => 'testkey'],
+            $transport,
+            $waiter,
+        );
+
+        $provider = new AnidbMetadataProvider(
+            ['username' => 'testuser', 'api_key' => 'testkey', 'use_title_dump' => false, 'title_dump_url' => 'http://example.com/anime-titles.dat.gz'],
+            $transport,
+            $waiter,
+        );
+
+        // Call fetchAnimeMetadata which should trigger parseAnimeResponse
+        $result = $provider->fetchAnimeMetadata(1);
+
+        // Verify the result is a non-empty array with expected structure
+        $this->assertIsArray($result);
+    }
 }

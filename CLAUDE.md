@@ -5,11 +5,12 @@ AniDB metadata-provider plugin for [Phlix](https://github.com/detain/phlix). Res
 ## Commands
 
 ```bash
-composer install               # install deps (incl. phpunit ^10)
+composer install               # install deps (incl. phpunit ^10, phpstan ^2.2)
 vendor/bin/phpunit             # run the Unit suite (phpunit.xml)
 vendor/bin/phpunit --testdox   # verbose, human-readable output
+vendor/bin/phpstan analyse --no-progress   # static analysis, level 9 (phpstan.neon)
 ```
-CI runs the same on push via `.github/workflows/test.yml` (PHP 8.3+).
+CI runs both on push via `.github/workflows/test.yml` (`phpunit` job on PHP 8.3 + 8.4, plus a `phpstan` job).
 
 ```bash
 vendor/bin/phpunit tests/Unit/AnidbMetadataProviderTest.php          # run a single test file
@@ -19,23 +20,29 @@ vendor/bin/phpunit --filter test_parses_anime_response_correctly     # run one t
 ```bash
 composer dump-autoload   # regenerate the PSR-4 autoloader after adding a class
 composer validate        # verify composer.json is well-formed
+php scripts/add-copyright-headers.php src   # idempotently insert the @copyright docblock
 ```
 
 ## Architecture
 
 - **Entry**: `src/AnidbMetadataProvider.php` — FQCN `Phlix\Anidb\AnidbMetadataProvider`, declared as `entry` in `plugin.json`.
-- **Contract**: implements `LifecycleInterface` from `detain/phlix-shared` ^0.6; `subscribedEvents()` returns `[]`, plus `lookup(string $filePath): array`.
-- **Lookup flow** (`lookup()`): `extractAnimeName()` parses filename → title-dump search → fallback `ANIME aname=` UDP call → `parseAnimeResponse()` → `mapToMetadataReturn()` / `mapAnimeStatus()`.
+- **Contract**: implements `LifecycleInterface` + `MetadataSourceInterface` from `detain/phlix-shared` ^0.21; `subscribedEvents()` returns `[]`, plus `lookup(string $filePath): array`.
+- **Host adapter**: `src/AnidbMetadataProviderAdapter.php` implements the server-side `Phlix\Media\Metadata\MetadataProviderInterface` (`search()`/`getDetails()`/`getImages()`) and is registered with the host MetadataManager from `onEnable()`.
+- **Seams** (constructor-injected, all default-constructed): `src/Udp/UdpClient.php` (AUTH, session key, flood protection, `506` retry) over `src/Udp/UdpClientInterface.php` (`src/Udp/SocketUdpClient.php`), `src/Udp/WaiterInterface.php` (`src/Udp/ProductionWaiter.php`), `src/AnimeResponseParser.php`, `src/Parser/FilenameTitleExtractor.php`, `src/Parser/EpisodeExtractor.php`, `src/TitleDump/TitleDumpManager.php`, DTO `src/Dto/AnimeDto.php`.
+- **Lookup flow** (`lookup()`): `FilenameTitleExtractor::extract()` → `ensureConnected()` (lazy, never at boot) → `EpisodeExtractor::extract()` → `TitleDumpManager::search()` → fallback `ANIME aname=` UDP call → `AnimeResponseParser::parseAnimeResponse()` → `mapToMetadataReturn()` / `mapAnimeStatus()`.
+- **Title dump**: `src/TitleDump/TitleDumpIndexer.php` downloads and indexes `anime-titles.dat.gz` off the event loop; `src/TitleDump/TitleDumpUrlMigration.php` rewrites a stored `http://` URL to https.
 - **Settings**: `username`, `api_key` (secret), `use_title_dump`, `title_dump_url` — defined in `plugin.json` `settings`.
-- **Design reference**: `PLAN.md` documents the UDP protocol, flood limits, amask bits, session lifecycle, and DTO shape.
-- **Tests**: `tests/Unit/AnidbMetadataProviderTest.php`; bootstrap `tests/bootstrap.php` only requires `vendor/autoload.php`.
+- **Design reference**: `PLAN.md` documents the UDP protocol, flood limits, amask bits, session lifecycle, and DTO shape; `docs/HOST_INTEGRATION.md` documents host wiring.
+- **Tests**: `tests/Unit/` and `tests/Unit/TitleDump/`; bootstrap `tests/bootstrap.php` requires `vendor/autoload.php` and loads `tests/Stub/MetadataProviderInterface.php` when the host interface is absent.
 
 ## Conventions
 
-- `declare(strict_types=1);` at the top of every PHP file (see `src/` and `tests/`).
-- Test namespace `Phlix\Anidb\Tests\` (autoload-dev in `composer.json`); test private methods via `ReflectionClass` + `setAccessible(true)`, cover edge cases with `static` data providers.
-- `lookup()` return shape is fixed — keys `title`, `original_name`, `overview`, `year`, `genres`, `rating`, `poster_url`, `episodes`, `type`, `anidb_id`, `titles`, `status` (full list in `README.md`).
+- `declare(strict_types=1);` and the `@copyright`/`@license` docblock at the top of every PHP file (see `src/` and `tests/`).
+- Test namespace `Phlix\Anidb\Tests\` (autoload-dev in `composer.json`); test private methods via `ReflectionClass` + `setAccessible(true)`, cover edge cases with `static` data providers, and inject the seams instead of hitting the network.
+- `lookup()` return shape is fixed — keys `title`, `original_name`, `overview`, `year`, `genres`, `rating`, `vote_count`, `poster_url`, `fanart_url`, `episodes`, `type`, `anidb_id`, `titles`, `status`, `runtime_ticks`, `studio`, `studios`, `source`, `is_movie`, `synonyms`, `episode_number` (full list in `README.md`).
 - AniDB UDP rules: ≥4s between packets, reuse one local port, PING ~30 min to keep the session. Never exceed flood limits.
+- `onEnable()` does wiring only — no network/disk/socket I/O (it runs in every resident worker at boot); downloads and index loads are deferred to `ensureConnected()`.
+- Title-dump cache dir must live outside the plugin tree: explicit ctor arg → `$settings['cache_dir']` → env `PHLIX_ANIDB_CACHE_DIR` → `sys_get_temp_dir()`.
 - No PDO/raw mysqli; this plugin makes no direct DB calls.
 
 ## Workflow

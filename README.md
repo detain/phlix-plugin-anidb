@@ -19,7 +19,7 @@ This plugin fetches structured anime metadata from [AniDB](https://anidb.net/) u
 - **Description** — fetch long descriptions via separate ANIMEDESC command
 - **Flood protection** — 4-second rate limiting between API calls (per AniDB rules)
 - **Session management** — keepalive pings every 30 min, auto-reconnect on 506 INVALID SESSION
-- **Episode info** — planned (not yet implemented)
+- **Episode info** — episode number parsed from the filename by `src/Parser/EpisodeExtractor.php` and returned as `episode_number`
 
 ## Install
 
@@ -50,6 +50,8 @@ Configure these in the Phlix admin **Plugins → Configure** dialog.
 | `use_title_dump` | boolean | No | `true` | Download the daily title dump for fast, offline search (reduces rate-limited API calls). |
 | `title_dump_url` | string | No | `https://anidb.net/api/anime-titles.dat.gz` | URL to `anime-titles.dat.gz`; change only for a mirror. Must be **https** — AniDB's Cloudflare front answers plain http with 403, so an http URL silently leaves the offline index empty. A stored `http://…anidb.net/…` value from before 0.4.1 is migrated to https automatically. |
 
+The title-dump index is written to a writable cache directory outside the plugin tree, resolved in this order: constructor argument → `cache_dir` setting → the `PHLIX_ANIDB_CACHE_DIR` environment variable → `sys_get_temp_dir()`.
+
 > The AniDB UDP API authenticates with your **username** + a separate **API Key** you set in your
 > profile (not your website login password). Set the API Key under
 > [your AniDB profile](https://anidb.net/) → Settings → Account → API.
@@ -70,6 +72,10 @@ Internal flow (when `lookup()` or `getDetails()` is called):
 1. **Fetch details** — send `ANIME aid=...` for full anime data
 2. **Fetch description** — send `ANIMEDESC aid=...` for the full synopsis
 3. **Map response** — translate AniDB field layout to MetadataManager's expected return shape
+
+Registration (`onEnable()`) does wiring only — the socket, title-dump download and
+index load are deferred to the first real lookup so plugin boot never blocks the
+resident Workerman worker.
 
 ## AniDB Protocol Notes
 
@@ -100,6 +106,11 @@ See the [AniDB UDP API docs](https://wiki.anidb.net/UDP_API_Definition) for full
     'status'        => 'Finished',               // Finished / Currently Airing / Upcoming
     'runtime_ticks'  => null,                     // Not provided by AniDB
     'studio'        => null,                     // AniDB uses categories instead
+    'studios'       => [],                       // Same, as a list
+    'source'        => null,                     // Source material, when known
+    'is_movie'      => false,                    // Derived from type / filename pattern
+    'synonyms'      => ['Crest of the Stars'],   // Short/synonym titles from the dump
+    'episode_number' => 1,                       // Parsed from the filename (null if absent)
 ]
 ```
 
@@ -118,7 +129,8 @@ This plugin is based on [`phlix-plugin-example`](https://github.com/detain/phlix
 ```bash
 composer install
 vendor/bin/phpunit
-vendor/bin/phpunit --testdox  # verbose output
+vendor/bin/phpunit --testdox              # verbose output
+vendor/bin/phpstan analyse --no-progress  # static analysis, level 9 (phpstan.neon)
 ```
 
 ## License

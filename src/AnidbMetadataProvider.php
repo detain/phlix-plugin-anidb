@@ -986,7 +986,8 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         }
 
         // Only allow safe filename characters and common image extensions.
-        if (!preg_match('/^[a-zA-Z0-9_\-]+\.(jpg|jpeg|png|gif|webp)$/', $picname)) {
+        // Spaces are valid in filenames (e.g. "has spaces.jpg").
+        if (!preg_match('/^[a-zA-Z0-9_\- ]+\.(jpg|jpeg|png|gif|webp)$/', $picname)) {
             return null;
         }
 

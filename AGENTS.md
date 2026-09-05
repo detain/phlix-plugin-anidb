@@ -9,8 +9,9 @@ composer install               # install deps (phpunit ^10, phpstan ^2.2, detain
 vendor/bin/phpunit             # run the Unit suite (config in phpunit.xml)
 vendor/bin/phpunit --testdox   # verbose output
 vendor/bin/phpstan analyse --no-progress   # static analysis, level 9 (phpstan.neon)
+php scripts/security-audit-check.php       # security gate: composer audit over the whole lock
 ```
-CI mirrors this via `.github/workflows/test.yml` (`phpunit` job on PHP 8.3 + 8.4, plus a `phpstan` job).
+CI mirrors this via `.github/workflows/test.yml` (`phpunit` job on PHP 8.3 + 8.4, a `phpstan` job, and a blocking `composer-audit` job on push and pull_request).
 
 ## Architecture
 
@@ -21,6 +22,7 @@ CI mirrors this via `.github/workflows/test.yml` (`phpunit` job on PHP 8.3 + 8.4
 - **Flow**: `lookup()` → `FilenameTitleExtractor::extract()` → `ensureConnected()` (lazy, never at boot) → `EpisodeExtractor::extract()` → `TitleDumpManager::search()` → fallback `ANIME aname=` UDP → `AnimeResponseParser::parseAnimeResponse()` → `mapToMetadataReturn()`/`mapAnimeStatus()`.
 - **Title dump**: `src/TitleDump/TitleDumpIndexer.php` (download + index off the event loop), `src/TitleDump/TitleDumpUrlMigration.php` (stored `http://` URL → https).
 - **Settings** (`plugin.json`): `username`, `api_key` (secret), `use_title_dump`, `title_dump_url`.
+- **Security gate**: `scripts/security-audit-check.php` audits the whole `composer.lock` (`require` + `require-dev`) and is pinned by `tests/Unit/SecurityAuditCheckTest.php`.
 - **Protocol/design**: `PLAN.md` (UDP flood limits, amask bits, session lifecycle, DTO); `docs/HOST_INTEGRATION.md` (host wiring).
 - **Tests**: `tests/Unit/` and `tests/Unit/TitleDump/`, bootstrap `tests/bootstrap.php` (loads `tests/Stub/MetadataProviderInterface.php` when the host interface is absent).
 
@@ -31,6 +33,7 @@ CI mirrors this via `.github/workflows/test.yml` (`phpunit` job on PHP 8.3 + 8.4
 - `lookup()` returns a fixed key set (`title`, `original_name`, `overview`, `year`, `genres`, `rating`, `vote_count`, `poster_url`, `fanart_url`, `episodes`, `type`, `anidb_id`, `titles`, `status`, `runtime_ticks`, `studio`, `studios`, `source`, `is_movie`, `synonyms`, `episode_number`) or `[]`.
 - `onEnable()` is wiring only — no network/disk I/O; defer to `ensureConnected()` on first lookup.
 - AniDB UDP: ≥4s between packets, reuse one local port, PING ~30 min. No PDO/raw mysqli.
+- Keep `composer-audit` LAST in `.github/workflows/test.yml` with no `continue-on-error`, no `if:` and no `--no-dev`; `tests/Unit/SecurityAuditCheckTest.php` parses the workflow and fails on those edits.
 - One PR per `PLAN.md` phase; don't move hardcoded CI creds in `.github/workflows/` to `secrets.*` unprompted.
 
 <!-- caliber:managed:pre-commit -->

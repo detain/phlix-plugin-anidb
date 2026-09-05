@@ -131,6 +131,7 @@ composer install
 vendor/bin/phpunit
 vendor/bin/phpunit --testdox              # verbose output
 vendor/bin/phpstan analyse --no-progress  # static analysis, level 9 (phpstan.neon)
+php scripts/security-audit-check.php      # security audit over the whole lock (require + require-dev)
 ```
 
 ## License

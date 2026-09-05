@@ -10,7 +10,7 @@ vendor/bin/phpunit             # run the Unit suite (phpunit.xml)
 vendor/bin/phpunit --testdox   # verbose, human-readable output
 vendor/bin/phpstan analyse --no-progress   # static analysis, level 9 (phpstan.neon)
 ```
-CI runs both on push via `.github/workflows/test.yml` (`phpunit` job on PHP 8.3 + 8.4, plus a `phpstan` job).
+CI runs these on push and pull_request via `.github/workflows/test.yml` (`phpunit` job on PHP 8.3 + 8.4, a `phpstan` job, and a blocking `composer-audit` job).
 
 ```bash
 vendor/bin/phpunit tests/Unit/AnidbMetadataProviderTest.php          # run a single test file
@@ -21,6 +21,7 @@ vendor/bin/phpunit --filter test_parses_anime_response_correctly     # run one t
 composer dump-autoload   # regenerate the PSR-4 autoloader after adding a class
 composer validate        # verify composer.json is well-formed
 php scripts/add-copyright-headers.php src   # idempotently insert the @copyright docblock
+php scripts/security-audit-check.php        # blocking security gate: composer audit over the whole lock
 ```
 
 ## Architecture
@@ -32,6 +33,7 @@ php scripts/add-copyright-headers.php src   # idempotently insert the @copyright
 - **Lookup flow** (`lookup()`): `FilenameTitleExtractor::extract()` → `ensureConnected()` (lazy, never at boot) → `EpisodeExtractor::extract()` → `TitleDumpManager::search()` → fallback `ANIME aname=` UDP call → `AnimeResponseParser::parseAnimeResponse()` → `mapToMetadataReturn()` / `mapAnimeStatus()`.
 - **Title dump**: `src/TitleDump/TitleDumpIndexer.php` downloads and indexes `anime-titles.dat.gz` off the event loop; `src/TitleDump/TitleDumpUrlMigration.php` rewrites a stored `http://` URL to https.
 - **Settings**: `username`, `api_key` (secret), `use_title_dump`, `title_dump_url` — defined in `plugin.json` `settings`.
+- **Security gate**: `scripts/security-audit-check.php` runs `composer audit --locked --format=json` over the whole lock (`require` + `require-dev`), prints the audited corpus, and is pinned by execution in `tests/Unit/SecurityAuditCheckTest.php`.
 - **Design reference**: `PLAN.md` documents the UDP protocol, flood limits, amask bits, session lifecycle, and DTO shape; `docs/HOST_INTEGRATION.md` documents host wiring.
 - **Tests**: `tests/Unit/` and `tests/Unit/TitleDump/`; bootstrap `tests/bootstrap.php` requires `vendor/autoload.php` and loads `tests/Stub/MetadataProviderInterface.php` when the host interface is absent.
 
@@ -49,6 +51,7 @@ php scripts/add-copyright-headers.php src   # idempotently insert the @copyright
 
 - One PR per logical phase (see `PLAN.md`): commit with a detailed message → push → open + merge PR → continue.
 - Do NOT refactor hardcoded CI credentials in `.github/workflows/` to `secrets.*` without asking first.
+- Keep the `composer-audit` job LAST in `.github/workflows/test.yml` with no `continue-on-error`, no `if:` condition and no `--no-dev` exclusion — `tests/Unit/SecurityAuditCheckTest.php` parses the workflow and fails on each of those edits. The only escape hatch for an advisory is `config.audit.ignore` in `composer.json`.
 
 <!-- caliber:managed:pre-commit -->
 ## Before Committing

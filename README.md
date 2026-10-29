@@ -15,7 +15,7 @@ This plugin fetches structured anime metadata from [AniDB](https://anidb.net/) u
 ## Features
 
 - **Title dump search** — fast fuzzy-match search against all AniDB anime titles
-- **Full metadata** — romaji/english/kanji titles, synonyms, genres, year, type, rating
+- **Full metadata** — romaji/english/kanji titles, synonyms, year, type, rating (the `genres` key is always empty — AniDB category tags are not in the fetched response, see Protocol Notes)
 - **Description** — fetch long descriptions via separate ANIMEDESC command
 - **Flood protection** — 4-second rate limiting between API calls (per AniDB rules)
 - **Session management** — keepalive pings every 30 min, auto-reconnect on 506 INVALID SESSION
@@ -83,6 +83,7 @@ resident Workerman worker.
 - **Flood protection**: ≤ 0.5 packets/sec after first 5, minimum 4 seconds between packets
 - **Session**: valid 35 minutes; keep alive with PING every ~30 minutes
 - **Flood ban**: reusing the same local UDP port is critical to avoid IP-level bans
+- **Field coverage**: the ANIME amask in use (`00f0f0f0000000`) returns titles, episode/date and rating fields only — AniDB's category/genre tags are not part of that response, so `genres` is structurally always empty (deriving real genres would additionally require vote/weight filtering over the tag cloud)
 
 See the [AniDB UDP API docs](https://wiki.anidb.net/UDP_API_Definition) for full details.
 
@@ -94,7 +95,7 @@ See the [AniDB UDP API docs](https://wiki.anidb.net/UDP_API_Definition) for full
     'original_name' => 'Crest of the Stars',     // English official title (or kanji)
     'overview'      => 'A space opera...',       // Description (fetched separately)
     'year'          => 1999,                     // First release year
-    'genres'        => ['SciFi', 'Space'],       // Category tags
+    'genres'        => [],                        // Always empty — categories not in the fetched amask
     'rating'        => 8.53,                     // AniDB rating (0-10)
     'vote_count'    => 3225,                     // Number of votes
     'poster_url'    => 'https://cdn-eu.anidb.net/images/main/1.jpg',  // null if no picname
@@ -105,7 +106,7 @@ See the [AniDB UDP API docs](https://wiki.anidb.net/UDP_API_Definition) for full
     'titles'        => ['Seikai no Monshou', 'Crest of the Stars', '星界の紋章'],
     'status'        => 'Finished',               // Finished / Currently Airing / Upcoming
     'runtime_ticks'  => null,                     // Not provided by AniDB
-    'studio'        => null,                     // AniDB uses categories instead
+    'studio'        => null,                     // No studio field; AniDB's studio data lives in categories (not fetched)
     'studios'       => [],                       // Same, as a list
     'source'        => null,                     // Source material, when known
     'is_movie'      => false,                    // Derived from type / filename pattern

@@ -594,6 +594,11 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      * to an AniDB AID (via title dump or API), fetches full anime details,
      * and returns structured metadata.
      *
+     * Note: `genres` is currently always empty — the configured ANIME amask
+     * (00f0f0f0000000) does not include AniDB categories, so the mapped
+     * `categories` list can never be non-empty. The key is kept for wire-shape
+     * stability. @see AnimeResponseParser::buildAnimeFromFields()
+     *
      * @param string $filePath Absolute filesystem path of the media item.
      *
      * @return array{
@@ -890,7 +895,7 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
             'original_name' => $anime['english'] ?: ($anime['kanji'] ?: null),
             'overview'     => $anime['description'] ?? null,
             'year'         => $anime['year_int'] ?? null,
-            'genres'       => $anime['categories'],
+            'genres'       => $anime['categories'], // honest empty: amask excludes AniDB categories
             'rating'       => $anime['rating'],
             'vote_count'   => $anime['vote_count'],
             'poster_url'   => $posterUrl,
@@ -901,7 +906,7 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
             'titles'       => array_values(array_unique($allTitles)),
             'status'       => $this->mapAnimeStatus($anime),
             'runtime_ticks'=> null, // AniDB doesn't provide episode length in basic response
-            'studio'       => null, // AniDB doesn't have a single "studio" field; categories used instead
+            'studio'       => null, // AniDB has no studio field; its studio data lives in categories (unfetched)
             // P9-S5: Extended anime-specific fields
             'studios'      => $anime['studios'] ?? [],
             'source'       => $anime['source'] ?? null,

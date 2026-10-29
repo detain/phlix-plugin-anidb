@@ -49,8 +49,9 @@ Configure these in the Phlix admin **Plugins → Configure** dialog.
 | `api_key` | string (secret) | **Yes** | — | The UDP **API Key** (API password) set in your AniDB profile under Settings → Account → API — separate from your login password. See the [AniDB API docs](https://anidb.net/software/api). |
 | `use_title_dump` | boolean | No | `true` | Download the daily title dump for fast, offline search (reduces rate-limited API calls). |
 | `title_dump_url` | string | No | `https://anidb.net/api/anime-titles.dat.gz` | URL to `anime-titles.dat.gz`; change only for a mirror. Must be **https** — AniDB's Cloudflare front answers plain http with 403, so an http URL silently leaves the offline index empty. A stored `http://…anidb.net/…` value from before 0.4.1 is migrated to https automatically. |
+| `cache_dir` | string | No | — | Absolute path of a writable directory for the title-dump index. It **must** live outside the read-only plugin tree (systemd sandbox). Unset falls back to the `PHLIX_ANIDB_CACHE_DIR` environment variable, then the system temp dir. |
 
-The title-dump index is written to a writable cache directory outside the plugin tree, resolved in this order: constructor argument → `cache_dir` setting → the `PHLIX_ANIDB_CACHE_DIR` environment variable → `sys_get_temp_dir()`.
+The title-dump index is written to a writable cache directory outside the plugin tree, resolved in this order: constructor argument → `cache_dir` setting → the `PHLIX_ANIDB_CACHE_DIR` environment variable → `sys_get_temp_dir()/phlix-plugin-anidb`.
 
 > The AniDB UDP API authenticates with your **username** + a separate **API Key** you set in your
 > profile (not your website login password). Set the API Key under

@@ -45,6 +45,8 @@ use Psr\Container\ContainerInterface;
  * - use_title_dump: whether to download/use title dump (default: true)
  * - title_dump_url: URL to anime-titles.dat.gz (default: AniDB official, https —
  *   a stored plain-http AniDB URL is migrated by {@see TitleDumpUrlMigration})
+ * - cache_dir: writable directory for the title-dump index (optional; unset
+ *   falls back to env PHLIX_ANIDB_CACHE_DIR, then sys_get_temp_dir()/phlix-plugin-anidb)
  *
  * ## Protocol notes
  *
@@ -87,7 +89,7 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     /**
      * Plugin settings from plugin.json.
      *
-     * @var array{username: string, api_key: string, use_title_dump: bool, title_dump_url: string}
+     * @var array{username: string, api_key: string, use_title_dump: bool, title_dump_url: string, cache_dir?: string}
      */
     private array $settings;
 
@@ -178,7 +180,7 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     private ?AnidbMetadataProviderAdapter $adapter = null;
 
     /**
-     * @param array{username: string, api_key: string, use_title_dump: bool, title_dump_url: string} $settings
+     * @param array{username: string, api_key: string, use_title_dump: bool, title_dump_url: string, cache_dir?: string} $settings
      *     Plugin settings from plugin.json. api_key is the AniDB API password
      *     (NOT the website login password).
      * @param UdpClientInterface|null $udpClient Transport seam. Defaults to a

@@ -40,6 +40,13 @@
             "tier": "advanced",
             "label": "Title Dump URL",
             "description": "Source URL for the anime-titles.dat.gz file. Optional — change only if using a mirror. Must be https: AniDB is behind Cloudflare, which answers the plain-http URL with 403 and leaves the offline index empty."
+        },
+        "cache_dir": {
+            "type": "string",
+            "required": false,
+            "tier": "advanced",
+            "label": "Title Dump Cache Directory",
+            "description": "Absolute path of the writable directory holding the title-dump index. It MUST live outside the read-only plugin tree. Leave unset to fall back to the PHLIX_ANIDB_CACHE_DIR environment variable, then sys_get_temp_dir()/phlix-plugin-anidb."
         }
     },
     "signature": null

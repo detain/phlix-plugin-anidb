@@ -334,10 +334,18 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      * order: explicit constructor arg → $settings['cache_dir'] → env
      * PHLIX_ANIDB_CACHE_DIR → sys_get_temp_dir()/phlix-plugin-anidb.
      *
+     * A configured (operator-facing) candidate must be a non-empty string
+     * naming an absolute path; anything else fails loud at construction
+     * (see {@see requireAbsoluteCacheDir()}). The explicit constructor
+     * argument is the trusted host-internal seam and passes through raw.
+     *
      * @param array<string, mixed> $settings Plugin settings.
      * @param string|null          $explicit Explicit constructor override.
      *
      * @return string Absolute writable cache directory path.
+     *
+     * @throws \InvalidArgumentException If cache_dir (or its env twin) is
+     *     non-string or names a relative path.
      */
     private function resolveCacheDir(array $settings, ?string $explicit): string
     {
@@ -346,16 +354,53 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         }
 
         $fromSettings = $settings['cache_dir'] ?? null;
+        if ($fromSettings !== null && !is_string($fromSettings)) {
+            throw new \InvalidArgumentException(
+                'AnidbMetadataProvider: the cache_dir setting must be a string (absolute path)'
+                    . ' or unset; got ' . gettype($fromSettings) . '.',
+            );
+        }
         if (is_string($fromSettings) && $fromSettings !== '') {
-            return $fromSettings;
+            return $this->requireAbsoluteCacheDir($fromSettings, 'the cache_dir setting');
         }
 
         $fromEnv = getenv('PHLIX_ANIDB_CACHE_DIR');
         if (is_string($fromEnv) && $fromEnv !== '') {
-            return $fromEnv;
+            return $this->requireAbsoluteCacheDir($fromEnv, 'the PHLIX_ANIDB_CACHE_DIR environment variable');
         }
 
         return sys_get_temp_dir() . '/phlix-plugin-anidb';
+    }
+
+    /**
+     * Fail loud on a relative cache path and canonicalize an existing one.
+     *
+     * A relative configured value would silently resolve against the worker's
+     * current directory — dump data landing somewhere nobody administers —
+     * so only absolute paths are accepted. An existing directory is returned
+     * as its realpath, so a symlinked configured path cannot quietly redirect
+     * where the index is written; not-yet-created paths pass through
+     * unchanged (the indexer creates them lazily; realpath cannot pre-exist).
+     *
+     * @param string $candidate Configured cache directory (non-empty).
+     * @param string $source    Human name of the configuration source.
+     *
+     * @return string Absolute cache directory (canonicalized when it exists).
+     *
+     * @throws \InvalidArgumentException If the candidate is not an absolute path.
+     */
+    private function requireAbsoluteCacheDir(string $candidate, string $source): string
+    {
+        if (!str_starts_with($candidate, '/')) {
+            throw new \InvalidArgumentException(
+                'AnidbMetadataProvider: ' . $source . ' must name an absolute directory '
+                    . '(a relative path resolves against the worker CWD); got "' . $candidate . '".',
+            );
+        }
+
+        $resolved = realpath($candidate);
+
+        return $resolved !== false ? $resolved : $candidate;
     }
 
     /**
@@ -669,17 +714,6 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     // -------------------------------------------------------------------------
 
     /**
-     * Open the UDP transport (fixed local port >1024 to avoid multi-port ban).
-     *
-     * Delegates to the injected {@see UdpClientInterface}; the raw socket
-     * create/bind/configure lifecycle now lives in {@see SocketUdpClient}.
-     *
-     * @return void
-     *
-     * @throws \RuntimeException If socket creation/binding fails.
-     */
-
-    /**
      * Send a command to AniDB with automatic session management.
      *
      * Delegates to the injected {@see UdpClient} (high-level session client)
@@ -734,37 +768,6 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         return null;
     }
 
-    /**
-     * Load the title dump index from cache if not yet loaded.
-     *
-     * The cached index uses the grouped format:
-     *   [
-     *     ["aid" => 12345, "titles" => [["title" => "...", "type" => "main", "lang" => "en"], ...]],
-     *     ...
-     *   ]
-     *
-     * @return void
-     */
-
-    /**
-     * Validate the title index entries against the expected schema.
-     *
-     * Each entry must have:
-     *   - aid (int)
-     *   - titles (array)
-     *
-     * Each title in titles must have:
-     *   - title (string)
-     *   - type (string)
-     *   - lang (string)
-     *
-     * @param array<mixed> $entries
-     *
-     * @return list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}>
-     */
-
-    // -------------------------------------------------------------------------
-    // Private: Anime Details Fetch & Parse
     // -------------------------------------------------------------------------
     // Private: Anime Details Fetch & Parse
     // -------------------------------------------------------------------------

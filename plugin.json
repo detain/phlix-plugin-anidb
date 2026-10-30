@@ -46,7 +46,7 @@
             "required": false,
             "tier": "advanced",
             "label": "Title Dump Cache Directory",
-            "description": "Absolute path of the writable directory holding the title-dump index. It MUST live outside the read-only plugin tree. Leave unset to fall back to the PHLIX_ANIDB_CACHE_DIR environment variable, then sys_get_temp_dir()/phlix-plugin-anidb."
+            "description": "Absolute path of the writable directory holding the title-dump index. It MUST live outside the read-only plugin tree and MUST NOT be world-writable (the index is served from it). A relative or non-string value is refused at plugin construction. Leave unset to fall back to the PHLIX_ANIDB_CACHE_DIR environment variable, then sys_get_temp_dir()/phlix-plugin-anidb."
         }
     },
     "signature": null

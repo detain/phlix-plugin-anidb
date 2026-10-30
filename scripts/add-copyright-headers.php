@@ -8,6 +8,8 @@
  * Inserts copyright docblock only if the file lacks detain@interserver.net.
  */
 
+declare(strict_types=1);
+
 $rootDir = $argv[1] ?? __DIR__;
 $copyright = <<<'COPYRIGHT'
 /**

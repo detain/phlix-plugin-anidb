@@ -18,7 +18,7 @@ This plugin fetches structured anime metadata from [AniDB](https://anidb.net/) u
 - **Full metadata** — romaji/english/kanji titles, synonyms, year, type, rating (the `genres` key is always empty — AniDB category tags are not in the fetched response, see Protocol Notes)
 - **Description** — fetch long descriptions via separate ANIMEDESC command
 - **Flood protection** — 4-second rate limiting between API calls (per AniDB rules)
-- **Session management** — keepalive pings every 30 min, auto-reconnect on 506 INVALID SESSION
+- **Session management** — keepalive pings every 30 min, auto-reconnect on 506 SESSION EXPIRED
 - **Episode info** — episode number parsed from the filename by `src/Parser/EpisodeExtractor.php` and returned as `episode_number`
 
 ## Install
@@ -49,7 +49,7 @@ Configure these in the Phlix admin **Plugins → Configure** dialog.
 | `api_key` | string (secret) | **Yes** | — | The UDP **API Key** (API password) set in your AniDB profile under Settings → Account → API — separate from your login password. See the [AniDB API docs](https://anidb.net/software/api). |
 | `use_title_dump` | boolean | No | `true` | Download the daily title dump for fast, offline search (reduces rate-limited API calls). |
 | `title_dump_url` | string | No | `https://anidb.net/api/anime-titles.dat.gz` | URL to `anime-titles.dat.gz`; change only for a mirror. Must be **https** — AniDB's Cloudflare front answers plain http with 403, so an http URL silently leaves the offline index empty. A stored `http://…anidb.net/…` value from before 0.4.1 is migrated to https automatically. |
-| `cache_dir` | string | No | — | Absolute path of a writable directory for the title-dump index. It **must** live outside the read-only plugin tree (systemd sandbox). Unset falls back to the `PHLIX_ANIDB_CACHE_DIR` environment variable, then the system temp dir. |
+| `cache_dir` | string | No | — | Absolute path of a writable directory for the title-dump index. It **must** live outside the read-only plugin tree (systemd sandbox) and **must not** be world-writable (the index is served from it). A relative path or a non-string value is refused at construction with a loud error. Unset falls back to the `PHLIX_ANIDB_CACHE_DIR` environment variable (same rule), then the system temp dir. |
 
 The title-dump index is written to a writable cache directory outside the plugin tree, resolved in this order: constructor argument → `cache_dir` setting → the `PHLIX_ANIDB_CACHE_DIR` environment variable → `sys_get_temp_dir()/phlix-plugin-anidb`.
 
@@ -61,8 +61,9 @@ The title-dump index is written to a writable cache directory outside the plugin
 
 The plugin registers an `AnidbMetadataProviderAdapter` with the host MetadataManager.
 When the server needs anime metadata it calls the adapter's `search()` or
-`getDetails()` methods (the adapter's `lookup()` method is also available for
-file-path-based lookups):
+`getDetails()` methods (the adapter's surface is `search`/`getDetails`/`getImages`/
+`getProviders`/`getSourceName`; the file-path-based `lookup()` lives on the wrapped
+provider in `src/AnidbMetadataProvider.php`, not on the adapter):
 
 1. **search(title)** — resolve an anime title to an AID using the title dump or API fallback
 2. **getDetails(aid)** — fetch full anime metadata by AID
@@ -111,7 +112,7 @@ See the [AniDB UDP API docs](https://wiki.anidb.net/UDP_API_Definition) for full
     'studios'       => [],                       // Same, as a list
     'source'        => null,                     // Source material, when known
     'is_movie'      => false,                    // Derived from type / filename pattern
-    'synonyms'      => ['Crest of the Stars'],   // Short/synonym titles from the dump
+    'synonyms'      => ['Crest of the Stars'],   // Short/synonym titles from the ANIME response (field 10)
     'episode_number' => 1,                       // Parsed from the filename (null if absent)
 ]
 ```

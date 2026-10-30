@@ -210,12 +210,20 @@ final class UdpClient
      * '&s=' to a null sessionKey. AUTH also bypasses flood protection since
      * it's the first packet sent; the server enforces the rate limit.
      *
+     * Posture note: the AniDB UDP API has no encrypted transport — the
+     * username and API password travel in a cleartext datagram. This is
+     * protocol-inherent (there is no TCP/TLS alternative); operators should
+     * use a dedicated AniDB account whose API password differs from the
+     * site login password. See README ("Protocol & credential posture").
+     *
      * @return void
      *
-     * @throws \RuntimeException If AUTH fails.
+     * @throws \RuntimeException If credentials are unusable or AUTH fails.
      */
     public function authenticate(): void
     {
+        $this->requireCredentials();
+
         $cmd = sprintf(
             'AUTH user=%s&pass=%s&protover=3&client=phlix&clientver=1',
             urlencode($this->settings['username']),
@@ -236,6 +244,39 @@ final class UdpClient
 
         $this->sessionKey = $matches[2];
         $this->lastActivityTime = time();
+    }
+
+    /**
+     * Assert usable credentials exist before any AUTH command is built.
+     *
+     * The constructor's array{username, api_key} shape is documentation-time
+     * only — plugin settings can deliver a missing key, a non-string value, or
+     * an empty string (fresh installs before an API password is entered).
+     * Without this guard the sprintf() in authenticate() emitted an undefined-
+     * key warning and sent a malformed AUTH datagram the server rejected
+     * opaquely. Fail fast with a descriptive error instead.
+     *
+     * @return void
+     *
+     * @throws \RuntimeException If either credential is absent, non-string, or empty.
+     */
+    private function requireCredentials(): void
+    {
+        $unusable = [];
+
+        foreach (['username', 'api_key'] as $key) {
+            $value = $this->settings[$key] ?? null;
+            if (!is_string($value) || $value === '') {
+                $unusable[] = $key;
+            }
+        }
+
+        if ($unusable !== []) {
+            throw new \RuntimeException(
+                'anidb: username/api_key settings are required (missing or empty: '
+                . implode(', ', $unusable) . ')'
+            );
+        }
     }
 
     /**

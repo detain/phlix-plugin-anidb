@@ -20,16 +20,18 @@ namespace Phlix\Anidb\Udp;
  *
  * The default production implementation is {@see SocketUdpClient}, which wraps the
  * blocking `socket_*` lifecycle that previously lived inline on the provider. The
- * extraction is BEHAVIOR-PRESERVING — no flood-protection, async, or origin-
- * validation behavior is introduced here. Those land in later steps (S1b async,
- * B2 506 re-auth retry, S2/S3 origin validation) which consume this seam.
+ * extraction was BEHAVIOR-PRESERVING; the later steps that consume this seam have
+ * since shipped: the async waiter (S1b, {@see WaiterInterface}), the 506 re-auth
+ * retry, and origin validation all live in {@see UdpClient}, which drives this
+ * interface as its transport.
  *
  * ## Origin accessors
  *
  * {@see lastReplyHost()} / {@see lastReplyPort()} expose the source host/port of
- * the most recent datagram received by {@see send()}. They are captured but NOT
- * yet validated — the S2/S3 origin-validation step will compare them against the
- * expected AniDB endpoint. Before any reply has been received they return `null`.
+ * the most recent datagram received by {@see send()}. {@see UdpClient} consumes
+ * them to validate each reply against the expected AniDB endpoint (see
+ * UdpClient::isValidReplyOrigin()); transports themselves only capture, they do
+ * not validate. Before any reply has been received they return `null`.
  *
  * @package Phlix\Anidb\Udp
  * @since 0.3.0
@@ -39,8 +41,8 @@ interface UdpClientInterface
     /**
      * Open (create + bind + configure) the UDP socket.
      *
-     * Idempotency and re-open semantics match the previous inline
-     * {@see \Phlix\Anidb\AnidbMetadataProvider::openSocket()} behavior.
+     * Idempotency and re-open semantics match the provider's original inline
+     * socket-open behavior from before this seam was extracted.
      *
      * @return void
      *
@@ -72,7 +74,8 @@ interface UdpClientInterface
     /**
      * Source host of the most recently received reply, or null if none yet.
      *
-     * Captured for the later origin-validation step (S2/S3); not validated here.
+     * Captured for origin validation; the consuming {@see UdpClient} compares
+     * it against the expected AniDB endpoint. Transports do not validate here.
      *
      * @return string|null
      */
@@ -81,7 +84,8 @@ interface UdpClientInterface
     /**
      * Source port of the most recently received reply, or null if none yet.
      *
-     * Captured for the later origin-validation step (S2/S3); not validated here.
+     * Captured for origin validation; the consuming {@see UdpClient} compares
+     * it against the expected AniDB endpoint. Transports do not validate here.
      *
      * @return int|null
      */

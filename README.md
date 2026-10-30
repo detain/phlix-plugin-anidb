@@ -87,6 +87,21 @@ resident Workerman worker.
 - **Flood ban**: reusing the same local UDP port is critical to avoid IP-level bans
 - **Field coverage**: the ANIME amask in use (`00f0f0f0000000`) returns titles, episode/date and rating fields only — AniDB's category/genre tags are not part of that response, so `genres` is structurally always empty (deriving real genres would additionally require vote/weight filtering over the tag cloud)
 
+### Protocol & credential posture
+
+The AUTH command carries your AniDB username and API password in a **cleartext
+UDP datagram** — the AniDB UDP API has no TLS/encrypted transport and no TCP
+alternative exists for it. This is protocol-inherent, not a Phlix shortcut: any
+party on the network path between the Phlix server and `api.anidb.net:9000`
+could read those bytes. Mitigations, in order of importance:
+
+- Use a **dedicated AniDB account** for Phlix, never your personal one.
+- Set an **API password** that is unique to AniDB and not reused anywhere
+  (it is already separate from the site login password — see Settings above).
+- Run Phlix on trusted network infrastructure; if in doubt, confirm with your
+  host that the egress path to `api.anidb.net` is not shared with untrusted
+  tenants.
+
 See the [AniDB UDP API docs](https://wiki.anidb.net/UDP_API_Definition) for full details.
 
 ## Data Returned

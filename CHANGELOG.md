@@ -52,6 +52,25 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
   mkdir made race-safe `@mkdir` + re-check, failing loud-early with no
   doomed `file_put_contents` attempt when the directory cannot exist.
   Suite 366→371 tests, 1098→1110 assertions (exactly five new pins).
+- Review-campaign minors cluster (W-min3, five items, secaudit/qa lenses):
+  the `UdpClientInterface` / `SocketUdpClient` docblocks now state the shipped
+  truth (async waiter, 506 re-auth and origin validation all landed; transports
+  capture reply origins, `UdpClient` validates them) instead of the pre-S1b
+  "later steps" roadmap and the dangling `openSocket()` `@see`;
+  `UdpClient::authenticate()` gained a fail-fast `requireCredentials()` guard
+  (missing/non-string/empty `username`/`api_key` throw a descriptive
+  `RuntimeException` before a malformed AUTH datagram can leave the socket —
+  15 new pins); the README documents the protocol-inherent cleartext-UDP
+  credential posture with the dedicated-account mitigation (M-ANIDB-15);
+  `TitleDumpIndexer` no longer swallows the upstream fetch cause (the error
+  callback logs class + message; null-body, invalid-gzip and both size-cap
+  refusals log their reason) and the two operator notices redact absolute
+  paths to basenames, restored in full by `PHLIX_ANIDB_DEBUG=1` (M-ANIDB-19;
+  flipped notice pins + one new debug-mode pin); downloads are bounded by
+  `MAX_DOWNLOAD_BYTES`/`MAX_DECOMPRESSED_BYTES` and the constructor refuses
+  any non-http(s) `title_dump_url` scheme at the boundary without echoing the
+  URL (M-ANIDB-28).
+  Suite 371→395 tests, 1110→1200 assertions.
 
 ### Maintenance eras (post-0.4.1, moving main)
 - S246: whole-lock security audit gate (require + require-dev) — `0860a64`

@@ -37,6 +37,25 @@ final class TitleDumpIndexer
     public const MAX_AGE_SECONDS = 86400;
 
     /**
+     * Hard cap on the raw (gzipped) download body, in bytes.
+     *
+     * The real anime-titles.dat.gz is ~1.5 MB; 16 MiB leaves an order of
+     * magnitude of legit headroom while refusing an off-domain response
+     * (a misconfigured redirect to a large file must not exhaust worker
+     * memory — review M-ANIDB-28).
+     */
+    public const MAX_DOWNLOAD_BYTES = 16777216;
+
+    /**
+     * Hard cap on the DECOMPRESSED payload, in bytes (gzip-bomb defense).
+     *
+     * Passed to gzdecode() as its max_length so decompression itself stops
+     * at the cap; a payload reaching it is truncated or hostile either way
+     * and is refused fail-closed rather than parsed.
+     */
+    public const MAX_DECOMPRESSED_BYTES = 67108864;
+
+    /**
      * Deferral interval, in seconds, for the ONE-SHOT download timer.
      *
      * 0 = "run on the next event-loop tick", which is the entire intent of the
@@ -147,16 +166,33 @@ final class TitleDumpIndexer
 
     /**
      * @param string      $cacheDir     Directory to store the index file.
-     * @param string      $titleDumpUrl URL to anime-titles.dat.gz.
+     * @param string      $titleDumpUrl http(s) URL to anime-titles.dat.gz.
      * @param callable|null $httpClient Injectable HTTP client. Defaults to a
      *     non-blocking Workerman\Http\Client wrapper. The callable receives (url, callback)
      *     where callback is invoked with raw gzipped bytes or null on failure.
+     *
+     * @throws RuntimeException If $titleDumpUrl does not use the http or https scheme.
      */
     public function __construct(
         string $cacheDir,
         string $titleDumpUrl,
         ?callable $httpClient = null,
     ) {
+        // Scheme policy (review M-ANIDB-28): this URL is fetched with no
+        // authentication and its body is written into the plugin cache, so it
+        // must be a plain http(s) download — file://, ftp://, phar:// or any
+        // other scheme a mutated/stale setting could carry is refused at the
+        // boundary, before any fetch is attempted. The URL reaches here from
+        // admin settings, so it is untrusted input.
+        $scheme = strtolower((string) parse_url($titleDumpUrl, PHP_URL_SCHEME));
+        if ($scheme !== 'http' && $scheme !== 'https') {
+            // Deliberately does not echo the URL itself (it may embed userinfo).
+            throw new RuntimeException(
+                'TitleDumpIndexer: title_dump_url must use the http or https scheme'
+                . ($scheme === '' ? ' (no scheme given)' : ' (got "' . $scheme . '")')
+            );
+        }
+
         $this->cacheDir = $cacheDir;
         $this->titleDumpUrl = $titleDumpUrl;
         $this->httpClient = $httpClient ?? self::defaultHttpClient(...);
@@ -576,11 +612,12 @@ final class TitleDumpIndexer
             . 'regular file, so no worker can ever claim it and the title dump will never update '
             . 'again. The cache directory "%s" itself is healthy, and nothing in Phlix creates this '
             . 'state (it takes an operator mkdir, a restore artifact or a planted symlink). Recover '
-            . 'with: rm -rf "%s" — plain `rm` refuses a directory. Logged once per process.',
-            $marker,
+            . 'with: rm -rf "%s" — plain `rm` refuses a directory. '
+            . '(Set PHLIX_ANIDB_DEBUG=1 to log full paths.) Logged once per process.',
+            self::pathForLog($marker),
             $this->describeMarkerType($type, $marker),
-            $this->cacheDir,
-            $marker,
+            self::pathForLog($this->cacheDir),
+            self::pathForLog($marker),
         ));
     }
 
@@ -597,7 +634,7 @@ final class TitleDumpIndexer
 
             return $target === false
                 ? 'a symbolic link'
-                : sprintf('a symbolic link to "%s"', $target);
+                : sprintf('a symbolic link to "%s"', self::pathForLog($target));
         }
 
         return match ($type) {
@@ -743,6 +780,26 @@ final class TitleDumpIndexer
     }
 
     /**
+     * Render an absolute path for an operator-facing log line.
+     *
+     * Review M-ANIDB-19: the refusal notices used to embed full on-disk
+     * layout into the shared error log. By default only the basename is
+     * logged — combined with the surrounding message (which names the role:
+     * "cache directory", "in-flight marker") it is sufficient to locate the
+     * culprit. `PHLIX_ANIDB_DEBUG=1` restores exact absolute paths for live
+     * debugging.
+     */
+    private static function pathForLog(string $absolutePath): string
+    {
+        $debug = getenv('PHLIX_ANIDB_DEBUG');
+        if ($debug !== false && $debug !== '' && $debug !== '0') {
+            return $absolutePath;
+        }
+
+        return basename($absolutePath);
+    }
+
+    /**
      * Tell an operator, once per process, why the title dump stopped updating.
      *
      * Once — not once per attempt — because the refusal is re-evaluated on
@@ -762,8 +819,9 @@ final class TitleDumpIndexer
             . 'will not accept the in-flight marker "%s". A directory that cannot hold the marker '
             . 'cannot hold title_index.json either, so the download would be useless work. '
             . 'Fix the directory (ownership/permissions, free space, PHLIX_ANIDB_CACHE_DIR, or the '
-            . 'systemd ReadWritePaths sandbox) to resume title-dump updates. Logged once per process.',
-            $this->cacheDir,
+            . 'systemd ReadWritePaths sandbox) to resume title-dump updates. '
+            . '(Set PHLIX_ANIDB_DEBUG=1 to log full paths.) Logged once per process.',
+            self::pathForLog($this->cacheDir),
             self::IN_FLIGHT_MARKER,
         ));
     }
@@ -803,11 +861,39 @@ final class TitleDumpIndexer
         $this->fetch($onFetched);
 
         if ($fetchResult === null) {
+            // The transport layer logged the concrete cause (exception class and
+            // message in defaultHttpClient's error arm, or the absent-Workerman
+            // skip); this names WHICH stage refused so the log lines correlate.
+            error_log('TitleDumpIndexer: download attempt received no response body — see the fetch error above if one was logged');
             return false;
         }
 
-        $decoded = @gzdecode($fetchResult);
+        // Size caps (review M-ANIDB-28): refuse an oversize payload before it is
+        // parsed — the legit dump is orders of magnitude smaller, so any breach
+        // means a wrong/malicious endpoint, never a truncated good file.
+        $bodyBytes = strlen($fetchResult);
+        if ($bodyBytes > self::MAX_DOWNLOAD_BYTES) {
+            error_log(sprintf(
+                'TitleDumpIndexer: REFUSING response — %d bytes exceeds the %d byte compressed-download cap',
+                $bodyBytes,
+                self::MAX_DOWNLOAD_BYTES,
+            ));
+
+            return false;
+        }
+
+        $decoded = @gzdecode($fetchResult, self::MAX_DECOMPRESSED_BYTES);
         if ($decoded === false) {
+            error_log('TitleDumpIndexer: REFUSING response — body is not valid gzip data (corrupt transfer or wrong endpoint)');
+            return false;
+        }
+
+        if (strlen($decoded) >= self::MAX_DECOMPRESSED_BYTES) {
+            error_log(sprintf(
+                'TitleDumpIndexer: REFUSING response — decompressed size reached the %d byte cap (gzip bomb or truncated dump)',
+                self::MAX_DECOMPRESSED_BYTES,
+            ));
+
             return false;
         }
 
@@ -978,7 +1064,16 @@ final class TitleDumpIndexer
                 $state['body'] = $body !== '' ? $body : null;
                 $state['done'] = true;
             },
-            'error' => static function () use (&$state): void {
+            'error' => static function ($exception) use (&$state): void {
+                // Log the concrete upstream cause (review M-ANIDB-19): class +
+                // message. Workerman\Http\Client passes the Throwable; a
+                // transport error without one is still recorded, never swallowed.
+                error_log(sprintf(
+                    'TitleDumpIndexer: dump fetch failed — %s',
+                    $exception instanceof \Throwable
+                        ? $exception::class . ': ' . $exception->getMessage()
+                        : 'unspecified transport error',
+                ));
                 $state['body'] = null;
                 $state['done'] = true;
             },

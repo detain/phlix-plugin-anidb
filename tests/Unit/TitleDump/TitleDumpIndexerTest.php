@@ -356,13 +356,22 @@ DAT;
             $onResult(null);
         };
 
+        $log = $tmpDir . '/error.log';
+        $restore = $this->sinkErrorLog($log); // M-ANIDB-19: a fail-closed refusal must be visible, not silent
+
         try {
             $indexer = new TitleDumpIndexer($tmpDir, 'http://example.com/anime-titles.dat.gz', $httpClient);
 
             $result = $indexer->downloadAndIndex();
 
             $this->assertFalse($result);
+            $this->assertStringContainsString(
+                'received no response body',
+                (string) file_get_contents($log),
+                'the fail-closed download refusal logged no reason',
+            );
         } finally {
+            $restore();
             $this->recursiveDelete($tmpDir);
         }
     }
@@ -377,13 +386,130 @@ DAT;
             $onResult('not gzipped data');
         };
 
+        $log = $tmpDir . '/error.log';
+        $restore = $this->sinkErrorLog($log); // M-ANIDB-19: a fail-closed refusal must be visible, not silent
+
         try {
             $indexer = new TitleDumpIndexer($tmpDir, 'http://example.com/anime-titles.dat.gz', $httpClient);
 
             $result = $indexer->downloadAndIndex();
 
             $this->assertFalse($result);
+            $this->assertStringContainsString(
+                'not valid gzip',
+                (string) file_get_contents($log),
+                'the fail-closed gzdecode refusal logged no reason',
+            );
         } finally {
+            $restore();
+            $this->recursiveDelete($tmpDir);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // M-ANIDB-28 — scheme policy at the boundary, size caps before the parse
+    // -------------------------------------------------------------------------
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function illegalDumpUrlProvider(): array
+    {
+        return [
+            'ftp scheme'        => ['ftp://user:secret@files.example/dump.gz'],
+            'file scheme'       => ['file:///etc/passwd'],
+            'phar scheme'       => ['phar://payload.phar/dump.gz'],
+            'data scheme'       => ['data://text/plain;base64,AAA='],
+            'no scheme at all'  => ['example.com/anime-titles.dat.gz'],
+            'empty string'      => [''],
+        ];
+    }
+
+    /**
+     * @dataProvider illegalDumpUrlProvider
+     */
+    public function test_constructor_refuses_non_http_scheme_before_any_fetch(string $url): void
+    {
+        $thrown = null;
+        try {
+            new TitleDumpIndexer('/tmp/unused', $url, static function (string $u, callable $c): void {
+                self::fail('a fetch was attempted for an illegal scheme');
+            });
+        } catch (\Throwable $e) {
+            $thrown = $e;
+        }
+
+        $this->assertInstanceOf(\RuntimeException::class, $thrown);
+        $this->assertStringContainsString('must use the http or https scheme', $thrown->getMessage());
+        // The URL is admin-settable and may embed credentials: the message names
+        // the scheme, never the URL.
+        $this->assertStringNotContainsString('secret', $thrown->getMessage());
+    }
+
+    public function test_download_refuses_a_body_over_the_compressed_cap(): void
+    {
+        $tmpDir = sys_get_temp_dir() . '/title_dump_test_' . uniqid();
+        mkdir($tmpDir, 0755, true);
+
+        $oversize = str_repeat('x', TitleDumpIndexer::MAX_DOWNLOAD_BYTES + 1);
+        $httpClient = static function (string $url, callable $onResult) use ($oversize): void {
+            $onResult($oversize);
+        };
+
+        $log = $tmpDir . '/error.log';
+        $restore = $this->sinkErrorLog($log);
+
+        try {
+            $indexer = new TitleDumpIndexer($tmpDir, 'http://example.com/anime-titles.dat.gz', $httpClient);
+
+            $this->assertFalse($indexer->downloadAndIndex());
+            $this->assertStringContainsString(
+                'compressed-download cap',
+                (string) file_get_contents($log),
+                'the oversize refusal logged no reason',
+            );
+            $this->assertFileDoesNotExist($tmpDir . '/title_index.json', 'the refused body was written anyway');
+        } finally {
+            $restore();
+            $this->recursiveDelete($tmpDir);
+        }
+    }
+
+    public function test_download_refuses_a_decompressed_payload_at_the_cap(): void
+    {
+        // A payload decompressing to at least MAX_DECOMPRESSED_BYTES is refused
+        // fail-closed: the legitimate dump is an order of magnitude smaller, so
+        // reaching the cap means truncation or a gzip bomb, never a good file.
+        $tmpDir = sys_get_temp_dir() . '/title_dump_test_' . uniqid();
+        mkdir($tmpDir, 0755, true);
+
+        $bomb = gzencode(str_repeat('A', TitleDumpIndexer::MAX_DECOMPRESSED_BYTES + 1), 6);
+        $this->assertNotFalse($bomb);
+        $this->assertLessThan(
+            TitleDumpIndexer::MAX_DOWNLOAD_BYTES,
+            strlen($bomb),
+            'fixture must pass the compressed cap to isolate the decompressed cap',
+        );
+
+        $httpClient = static function (string $url, callable $onResult) use ($bomb): void {
+            $onResult($bomb);
+        };
+
+        $log = $tmpDir . '/error.log';
+        $restore = $this->sinkErrorLog($log);
+
+        try {
+            $indexer = new TitleDumpIndexer($tmpDir, 'http://example.com/anime-titles.dat.gz', $httpClient);
+
+            $this->assertFalse($indexer->downloadAndIndex());
+            $this->assertStringContainsString(
+                'decompressed size reached',
+                (string) file_get_contents($log),
+                'the decompressed-cap refusal logged no reason',
+            );
+            $this->assertFileDoesNotExist($tmpDir . '/title_index.json', 'the refused payload was written anyway');
+        } finally {
+            $restore();
             $this->recursiveDelete($tmpDir);
         }
     }
@@ -391,6 +517,20 @@ DAT;
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Point error_log at a scratch file; the returned closure restores the
+     * previous setting (this PHP build has no restore_error_log()).
+     */
+    private function sinkErrorLog(string $file): \Closure
+    {
+        $previous = ini_get('error_log');
+        ini_set('error_log', $file);
+
+        return static function () use ($previous): void {
+            ini_set('error_log', is_string($previous) ? $previous : '');
+        };
+    }
 
     private function recursiveDelete(string $dir): void
     {

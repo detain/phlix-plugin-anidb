@@ -25,9 +25,10 @@ namespace Phlix\Anidb\Udp;
  *   payload (or null on timeout);
  * - {@see close()} closes the socket if open.
  *
- * NO flood protection or origin validation is performed here — those are
- * provider/later-step concerns. {@see send()} additionally captures the reply's
- * source host/port for the future origin-validation step.
+ * The reply's source host/port are captured by {@see send()} for the caller —
+ * {@see UdpClient} validates them against the expected AniDB endpoint
+ * (UdpClient::isValidReplyOrigin()); this transport itself performs no flood
+ * protection or origin validation.
  *
  * @package Phlix\Anidb\Udp
  * @since 0.3.0
@@ -178,7 +179,7 @@ final class SocketUdpClient implements UdpClientInterface
             return null;
         }
 
-        // Capture the reply origin for the later origin-validation step (S2/S3).
+        // Capture the reply origin; UdpClient::isValidReplyOrigin() validates it.
         $this->lastReplyHost = $recvFrom !== '' ? $recvFrom : null;
         $this->lastReplyPort = $port !== 0 ? $port : null;
 

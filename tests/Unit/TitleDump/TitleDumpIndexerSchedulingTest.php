@@ -50,8 +50,24 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
     /** @var list<string> */
     private array $tmpDirs = [];
 
+    /** @var string|false The ini error_log value as found, restored by tearDown(). */
+    private string|false $originalErrorLog = false;
+
+    protected function setUp(): void
+    {
+        // M-ANIDB-19 gave failing download attempts an operator-visible log
+        // line. This class' non-isolated tests drive exactly those failures;
+        // sink error_log to a scratch dir so the notices never hit PHPUnit's
+        // stream. The isolated children keep their dedicated per-test sinks —
+        // their body-level ini_set overrides this one.
+        $this->originalErrorLog = ini_get('error_log');
+        ini_set('error_log', $this->makeTmpDir() . '/error.log');
+    }
+
     protected function tearDown(): void
     {
+        ini_set('error_log', is_string($this->originalErrorLog) ? $this->originalErrorLog : '');
+
         foreach ($this->tmpDirs as $dir) {
             $this->recursiveDelete($dir);
         }
@@ -261,6 +277,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         $dir = $this->makeUnusableCacheDir();
         $log = $this->makeTmpDir() . '/error.log';
         ini_set('error_log', $log);
+        putenv('PHLIX_ANIDB_DEBUG'); // default law: redacted paths
 
         $client = static function (string $url, callable $onResult): void {
             $onResult(null);
@@ -278,7 +295,44 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         ));
 
         $this->assertCount(1, $lines, '50 refusals produced more than one log line');
-        $this->assertStringContainsString($dir, $lines[0], 'the notice does not name the unusable directory');
+        $this->assertStringContainsString(
+            basename($dir),
+            $lines[0],
+            'the notice does not name the unusable directory at all',
+        );
+        // M-ANIDB-19 law: no absolute layout in the shared error log by default.
+        $this->assertStringNotContainsString(
+            $dir,
+            $lines[0],
+            'the notice embeds the full cache-dir path without PHLIX_ANIDB_DEBUG',
+        );
+    }
+
+    #[RunInSeparateProcess]
+    #[PreserveGlobalState(false)]
+    public function test_debug_env_restores_full_paths_in_operator_notices(): void
+    {
+        // Counterpart pin for the M-ANIDB-19 redaction: PHLIX_ANIDB_DEBUG=1 is
+        // the documented escape hatch and must restore the exact path.
+        $dir = $this->makeUnusableCacheDir();
+        $log = $this->makeTmpDir() . '/error.log';
+        ini_set('error_log', $log);
+        putenv('PHLIX_ANIDB_DEBUG=1');
+
+        $client = static function (string $url, callable $onResult): void {
+            $onResult(null);
+        };
+
+        (new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', $client))->downloadAndIndex();
+
+        $lines = $this->refusalLines($log);
+
+        $this->assertCount(1, $lines, 'the debug-mode refusal was not logged');
+        $this->assertStringContainsString(
+            $dir,
+            $lines[0],
+            'PHLIX_ANIDB_DEBUG=1 did not restore the full cache-dir path',
+        );
     }
 
     #[RunInSeparateProcess]
@@ -312,6 +366,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         // diagnosed as an unusable cache DIRECTORY.
         $log = $this->makeTmpDir() . '/error.log';
         ini_set('error_log', $log);
+        putenv('PHLIX_ANIDB_DEBUG'); // default law: redacted paths
 
         $fetches = 0;
         $client = static function (string $url, callable $onResult) use (&$fetches): void {
@@ -330,7 +385,8 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
 
         $lines = $this->refusalLines($log);
         $this->assertCount(1, $lines, 'the genuine refusal was not reported');
-        $this->assertStringContainsString($unusable, $lines[0], 'the notice does not name the unusable directory');
+        $this->assertStringContainsString(basename($unusable), $lines[0], 'the notice does not name the unusable directory');
+        $this->assertStringNotContainsString($unusable, $lines[0], 'the notice embeds the full path without PHLIX_ANIDB_DEBUG');
 
         // Now the racy state, in the SAME process: it must be BUSY (true), not
         // REFUSED (false), and it must not add a second "unusable cache
@@ -372,6 +428,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         // it reproduces for every uid including root and this test cannot skip.
         $log = $this->makeTmpDir() . '/error.log';
         ini_set('error_log', $log);
+        putenv('PHLIX_ANIDB_DEBUG'); // default law: redacted paths
 
         $dir = $this->makeTmpDir();
         $marker = $this->plantBlockedMarkerPath($dir, $shape);
@@ -393,7 +450,22 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
 
         $lines = $this->stallLines($log);
         $this->assertCount(1, $lines, '50 attempts over a blocked marker path did not log exactly once');
-        $this->assertStringContainsString($marker, $lines[0], 'the notice does not name the blocked marker path');
+        $this->assertStringContainsString(
+            basename($marker),
+            $lines[0],
+            'the notice does not name the blocked marker path',
+        );
+        $this->assertStringContainsString(
+            basename($dir),
+            $lines[0],
+            'the notice does not identify which cache directory is stalled',
+        );
+        // M-ANIDB-19 law: the shared error log carries no absolute layout by default.
+        $this->assertStringNotContainsString(
+            $marker,
+            $lines[0],
+            'the notice embeds the full marker path without PHLIX_ANIDB_DEBUG',
+        );
         $this->assertStringContainsString(
             $expectedDescription,
             $lines[0],

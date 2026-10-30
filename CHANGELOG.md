@@ -93,6 +93,23 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
   analyzed against `tests/Stub/MetadataProviderInterface.php` (M-ANIDB-20;
   M-ANIDB-12 cured-by-truth — the README/AGENTS "level 9" claim now covers
   all of `src/` with nothing hidden). Suite 395 tests held.
+- Review-campaign minors cluster (W-min5, three items, srphp lens):
+  `TitleDumpManager` now owns a single canonical in-memory title shape
+  `array{title, type, lang, lower, len}` minted once per load by
+  `canonicalTitleEntry()` from both entry points (`validateSchema()` on the
+  cache file and the `injectIndex()` test seam, which still accepts minimal
+  `{title,type,lang}` fixtures); the per-query scan and the exact-match map
+  read the precomputed `lower`/`len` instead of re-running
+  `mb_strtolower()`/`mb_strlen()` over every title of every query
+  (M-ANIDB-23). `TitleDumpIndexer::parse()` correspondingly stopped
+  persisting the `lower_title` field the schema validator stripped anyway —
+  `title_index.json` now carries raw fields only (pinned). The misplaced
+  `tests/Unit/TitleDump/TitleDumpManagerSearchTest.php` namespace matches
+  its directory (composer's PSR-4 warning cleared; M-ANIDB-30). The dead
+  `AnimeDto` import (M-ANIDB-22) was already cured by the W-min2 cluster at
+  `70f3874` — recorded, not re-edited. Suite 395→397 tests,
+  1200→1214 assertions (one builder pin re-cut to the new law, two new
+  pins).
 
 ### Maintenance eras (post-0.4.1, moving main)
 - S246: whole-lock security audit gate (require + require-dev) — `0860a64`

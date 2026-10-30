@@ -76,6 +76,24 @@ DAT;
         $this->assertCount(3, $result[2]['titles']);
     }
 
+    /**
+     * M-ANIDB-23 law: persisted title entries carry RAW fields only. The
+     * former 'lower_title' bloated every entry in title_index.json with
+     * derived state that validateSchema() stripped anyway; case/length are
+     * now minted in memory once per load by TitleDumpManager instead.
+     */
+    public function test_parse_persists_raw_fields_only_no_derived_keys(): void
+    {
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+        $result = $indexer->parse(self::FIXTURE_DAT);
+
+        foreach ($result as $entry) {
+            foreach ($entry['titles'] as $titleEntry) {
+                $this->assertSame(['title', 'type', 'lang'], array_keys($titleEntry));
+            }
+        }
+    }
+
     public function test_parse_skips_comment_lines(): void
     {
         $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');

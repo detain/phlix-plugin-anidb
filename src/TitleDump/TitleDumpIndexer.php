@@ -922,6 +922,10 @@ final class TitleDumpIndexer
     /**
      * Parse raw decompressed title dump content into grouped index structure.
      *
+     * The persisted shape carries raw fields only: case and length are derived
+     * state, computed once per load by {@see \Phlix\Anidb\TitleDump\TitleDumpManager},
+     * so the on-disk form never stores them (review anidb__srphp M-ANIDB-23).
+     *
      * @param string $content Decompressed content of anime-titles.dat.
      *
      * @return list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}>
@@ -955,7 +959,6 @@ final class TitleDumpIndexer
 
             $grouped[$aid]['titles'][] = [
                 'title' => $title,
-                'lower_title' => mb_strtolower($title),
                 'type'  => $type,
                 'lang'  => $lang,
             ];

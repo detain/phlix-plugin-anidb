@@ -8,7 +8,7 @@
  */
 declare(strict_types=1);
 
-namespace Phlix\Anidb\Tests\Unit;
+namespace Phlix\Anidb\Tests\Unit\TitleDump;
 
 use Phlix\Anidb\TitleDump\TitleDumpManager;
 use PHPUnit\Framework\TestCase;
@@ -234,25 +234,55 @@ final class TitleDumpManagerSearchTest extends TestCase
     }
 
     /**
-     * The map builder lowercases keys and keeps first-entry-wins on title
-     * collisions (the AID the pre-map scan returned first).
+     * M-ANIDB-23 law: derived fields are minted once at the canonical choke
+     * point (injectIndex/validateSchema → canonicalTitleEntry) and
+     * buildExactIndex CONSUMES the precomputed 'lower' key — it must never
+     * recompute from 'title'. First entry still wins on title collisions
+     * (the same AID the pre-map scan returned first).
      */
-    public function test_build_exact_index_lowercases_and_keeps_first_aid_on_collision(): void
+    public function test_build_exact_index_consumes_precomputed_lower_and_keeps_first_aid(): void
     {
         $manager = new TitleDumpManager($this->tempDir, 'http://example.com/test.gz');
 
-        $method = new \ReflectionMethod($manager, 'buildExactIndex');
-        $method->setAccessible(true);
+        $mint = new \ReflectionMethod($manager, 'canonicalTitleEntry');
+        $mint->setAccessible(true);
+        $build = new \ReflectionMethod($manager, 'buildExactIndex');
+        $build->setAccessible(true);
 
-        $map = $method->invoke($manager, [
-            ['aid' => 10, 'titles' => [['title' => 'KaRei', 'type' => 'main', 'lang' => 'en']]],
-            ['aid' => 20, 'titles' => [['title' => 'karei', 'type' => 'syn', 'lang' => 'ja']]],
-            ['aid' => 30, 'titles' => [['title' => 'Solo', 'type' => 'main', 'lang' => 'en']]],
+        // The mint point owns lowering and length.
+        $minted = $mint->invoke(null, ['title' => 'KaRei', 'type' => 'main', 'lang' => 'en']);
+        $this->assertSame('karei', $minted['lower']);
+        $this->assertSame(5, $minted['len']);
+
+        // The builder must READ 'lower', not derive it: these two entries
+        // carry a lower that intentionally diverges from mb_strtolower(title).
+        $map = $build->invoke($manager, [
+            ['aid' => 10, 'titles' => [['title' => 'KaRei', 'type' => 'main', 'lang' => 'en', 'lower' => 'minted-one', 'len' => 9]]],
+            ['aid' => 20, 'titles' => [['title' => 'anything', 'type' => 'syn', 'lang' => 'ja', 'lower' => 'minted-one', 'len' => 8]]],
+            ['aid' => 30, 'titles' => [$mint->invoke(null, ['title' => 'Solo', 'type' => 'main', 'lang' => 'en'])]],
         ]);
 
-        $this->assertArrayHasKey('karei', $map);
-        $this->assertSame(10, $map['karei']);
+        $this->assertSame(10, $map['minted-one']);
+        $this->assertArrayNotHasKey('karei', $map);
         $this->assertSame(30, $map['solo']);
+    }
+
+    /**
+     * M-ANIDB-23: injectIndex() canonicalizes minimal {title,type,lang}
+     * fixtures, so exact lookups work on hand-built test indices without
+     * anyone minting derived fields by hand.
+     */
+    public function test_inject_index_canonicalizes_minimal_fixture_entries(): void
+    {
+        $manager = new TitleDumpManager($this->tempDir, 'http://example.com/test.gz');
+        $manager->injectIndex([
+            ['aid' => 4, 'titles' => [['title' => 'CaSeD', 'type' => 'main', 'lang' => 'en']]],
+        ]);
+
+        // Case-insensitive exact hit proves 'lower' was minted on inject;
+        // a missing derived key would have thrown or missed under the new law.
+        $this->assertSame(4, $manager->search('cased'));
+        $this->assertSame(4, $manager->search('CAsE'));
     }
 
     private function createManagerWithIndex(array $index): TitleDumpManager

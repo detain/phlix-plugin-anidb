@@ -28,9 +28,15 @@ final class TitleDumpManager
     /**
      * Title dump index for fast offline search.
      *
-     * Grouped by AID: list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}>
+     * In-memory canonical shape, grouped by AID:
+     *   list<array{aid: int, titles: list<array{title: string, type: string, lang: string, lower: string, len: int}>>>
      *
-     * @var list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}>|null
+     * `lower`/`len` are derived state computed ONCE at load (or inject) so
+     * per-query scans never re-run mb_strtolower/mb_strlen over the whole
+     * dump (review anidb__srphp M-ANIDB-23). The persisted title_index.json
+     * deliberately does not carry them — see {@see TitleDumpIndexer::parse()}.
+     *
+     * @var list<array{aid: int, titles: list<array{title: string, type: string, lang: string, lower: string, len: int}>}>|null
      */
     private ?array $titleIndex = null;
 
@@ -70,8 +76,9 @@ final class TitleDumpManager
     /**
      * Search the title dump index for a matching anime.
      *
-     * The index is grouped by AID. Each entry contains:
-     *   ["aid" => 12345, "titles" => [["title" => "...", "type" => "main", "lang" => "en"], ...]]
+     * The index is grouped by AID. Each in-memory entry carries the canonical
+     * shape documented on {@see $titleIndex}:
+     *   ["aid" => 12345, "titles" => [["title" => "...", "type" => "main", "lang" => "en", "lower" => "...", "len" => 3], ...]]
      *
      * Ranking (not fuzzy matching): an exact, case-insensitive title hit
      * returns immediately, served from the lowercase-title map built once per
@@ -113,8 +120,10 @@ final class TitleDumpManager
             $titles = $entry['titles'];
 
             foreach ($titles as $titleEntry) {
-                $titleLower = $titleEntry['lower_title'] ?? mb_strtolower($titleEntry['title']);
-                $titleLen = mb_strlen($titleEntry['title']);
+                // Derived fields are precomputed at load (M-ANIDB-23): the
+                // per-query scan pays zero mb_* calls per title.
+                $titleLower = $titleEntry['lower'];
+                $titleLen = $titleEntry['len'];
 
                 // Prefix match: score = 800 - abs(len(query) - len(title))
                 // Prefer titles closer in length to the query
@@ -149,7 +158,7 @@ final class TitleDumpManager
      * is preserved deliberately. Called lazily from {@see search()} once per
      * loaded index; {@see injectIndex()} resets the memo.
      *
-     * @param list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}> $index
+     * @param list<array{aid: int, titles: list<array{title: string, type: string, lang: string, lower: string, len: int}>}> $index
      *
      * @return array<string, int>
      */
@@ -159,7 +168,7 @@ final class TitleDumpManager
 
         foreach ($index as $entry) {
             foreach ($entry['titles'] as $titleEntry) {
-                $lower = mb_strtolower($titleEntry['title']);
+                $lower = $titleEntry['lower'];
                 if (!isset($map[$lower])) {
                     $map[$lower] = $entry['aid'];
                 }
@@ -227,11 +236,11 @@ final class TitleDumpManager
      *
      * @param array<mixed> $entries
      *
-     * @return list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}>
+     * @return list<array{aid: int, titles: list<array{title: string, type: string, lang: string, lower: string, len: int}>}>
      */
     private function validateSchema(array $entries): array
     {
-        /** @var list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}> $validEntries */
+        /** @var list<array{aid: int, titles: list<array{title: string, type: string, lang: string, lower: string, len: int}>}> $validEntries */
         $validEntries = [];
 
         foreach ($entries as $entry) {
@@ -249,7 +258,7 @@ final class TitleDumpManager
                 continue;
             }
 
-            /** @var list<array{title: string, type: string, lang: string}> $validatedTitles */
+            /** @var list<array{title: string, type: string, lang: string, lower: string, len: int}> $validatedTitles */
             $validatedTitles = [];
 
             foreach ($entry['titles'] as $title) {
@@ -269,11 +278,11 @@ final class TitleDumpManager
                     continue 2;
                 }
 
-                $validatedTitles[] = [
+                $validatedTitles[] = self::canonicalTitleEntry([
                     'title' => $title['title'],
                     'type' => $title['type'],
                     'lang' => $title['lang'],
-                ];
+                ]);
             }
 
             $validEntries[] = [
@@ -328,15 +337,53 @@ final class TitleDumpManager
     /**
      * Inject a pre-built index for testing purposes.
      *
+     * Accepts the minimal persisted fixture shape (title/type/lang only);
+     * entries are canonicalized exactly like {@see validateSchema()} does on
+     * load, so tests never hand-craft derived fields (M-ANIDB-23).
+     *
      * @param list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}> $index
      *
      * @return void
      */
     public function injectIndex(array $index): void
     {
-        $this->titleIndex = $index;
+        /** @var list<array{aid: int, titles: list<array{title: string, type: string, lang: string, lower: string, len: int}>}> $normalized */
+        $normalized = [];
+
+        foreach ($index as $entry) {
+            $titles = [];
+            foreach ($entry['titles'] as $titleEntry) {
+                $titles[] = self::canonicalTitleEntry($titleEntry);
+            }
+
+            $normalized[] = ['aid' => $entry['aid'], 'titles' => $titles];
+        }
+
+        $this->titleIndex = $normalized;
         // The exact-match memo is derived state: a fresh index must rebuild it
         // on the next search() (otherwise stale titles would keep resolving).
         $this->exactIndex = null;
+    }
+
+    /**
+     * Expand a raw {title,type,lang} triple into the canonical in-memory
+     * shape by computing the derived `lower`/`len` fields once (M-ANIDB-23).
+     *
+     * Unknown keys are dropped: this is the single choke point where the
+     * canonical shape is minted (both load paths route through it).
+     *
+     * @param array{title: string, type: string, lang: string} $titleEntry
+     *
+     * @return array{title: string, type: string, lang: string, lower: string, len: int}
+     */
+    private static function canonicalTitleEntry(array $titleEntry): array
+    {
+        return [
+            'title' => $titleEntry['title'],
+            'type'  => $titleEntry['type'],
+            'lang'  => $titleEntry['lang'],
+            'lower' => mb_strtolower($titleEntry['title']),
+            'len'   => mb_strlen($titleEntry['title']),
+        ];
     }
 }

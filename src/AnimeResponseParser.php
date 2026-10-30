@@ -29,6 +29,13 @@ namespace Phlix\Anidb;
 final class AnimeResponseParser
 {
     /**
+     * Upper bound for a legitimate AniDB AID (review M-ANIDB-16). The public
+     * AID space is far below this; the cap exists so the identifier can never
+     * carry an integer-overflowed (or injected) digit column into `url`.
+     */
+    private const MAX_AID = 10_000_000;
+
+    /**
      * Decode escaped characters per AniDB spec.
      *
      * @param string $s Raw field string.
@@ -38,6 +45,28 @@ final class AnimeResponseParser
     private static function decode(string $s): string
     {
         return str_replace(["`", "<br />", "\n"], ["'", ' ', ' '], $s);
+    }
+
+    /**
+     * Cast a wire digit column to int, bounded (review M-ANIDB-16).
+     *
+     * Anything non-digit or outside 0..$max collapses to 0 instead of
+     * silently overflowing to a wrapped/PHP_INT_MAX value.
+     *
+     * @param string $value Raw field string.
+     * @param int    $max   Inclusive upper bound.
+     *
+     * @return int Bounded value.
+     */
+    private static function boundedInt(string $value, int $max): int
+    {
+        if (!ctype_digit($value) || strlen($value) > strlen((string) $max)) {
+            return 0;
+        }
+
+        $cast = (int) $value;
+
+        return $cast <= $max ? $cast : 0;
     }
 
     /**
@@ -72,60 +101,76 @@ final class AnimeResponseParser
             return null;
         }
 
-        return $this->buildAnimeFromFields($fields);
+        // Boundary parse (review M-ANIDB-16): the aid is interpolated into
+        // `url` and drives every downstream lookup — a malformed digit column
+        // must fail the whole parse, never pass through raw or overflowed.
+        if (!ctype_digit($fields[0]) || strlen($fields[0]) > strlen((string) self::MAX_AID)) {
+            return null;
+        }
+        $aid = (int) $fields[0];
+        if ($aid < 1 || $aid > self::MAX_AID) {
+            return null;
+        }
+
+        return $this->buildAnimeFromFields($fields, $aid);
     }
 
     /**
      * Build the anime array from parsed fields.
      *
      * @param list<string> $fields Parsed field values.
+     * @param int          $aid    Validated AniDB AID (see parseAnimeResponse).
      *
      * @return array<string, mixed> Anime data array.
      */
-    private function buildAnimeFromFields(array $fields): array
+    private function buildAnimeFromFields(array $fields, int $aid): array
     {
         // categories/tags are not included in amask=00f0f0f0000000 — set honest empty
         // @see AnimeResponseParser::parseAnimeResponse for mask details
         $categories = [];
 
-        // Parse year: "1999-2000" or "1999"
+        // Parse year: "1999-2000" or "1999" — the derived int only ever comes
+        // from a bounded digit column (M-ANIDB-16); the raw string stays.
         $yearStr = self::decode($fields[2]);
         $year = null;
         if ($yearStr !== '' && $yearStr !== '0000') {
-            $year = (int)explode('-', $yearStr)[0];
-            if ($year === 0) {
-                $year = null;
+            $yearHead = explode('-', $yearStr)[0];
+            if (ctype_digit($yearHead)) {
+                $yearCandidate = (int) $yearHead;
+                if ($yearCandidate >= 1 && $yearCandidate <= 9999) {
+                    $year = $yearCandidate;
+                }
             }
         }
 
         // AniDB rating is stored as e.g. "825" meaning 8.25
-        $rating = (int)$fields[19];
+        $rating = self::boundedInt($fields[19], 1000);
         $ratingFloat = $rating > 0 ? $rating / 100 : null;
 
         $rawType = self::decode($fields[3]);
-        $episodes = (int)$fields[12];
+        $episodes = self::boundedInt($fields[12], 1_000_000);
 
         $anime = [
-            'aid'            => (int)$fields[0],
+            'aid'            => $aid,
             'romaji'         => self::decode($fields[6]),
             'english'        => self::decode($fields[8]),
             'kanji'          => self::decode($fields[7]),
             'other'          => self::decode($fields[9]),
             'synonyms'       => array_filter(array_map('trim', explode(',', self::decode($fields[10])))),
             'episodes'       => $episodes,
-            'specials'       => (int)$fields[14],
-            'highest_ep'     => (int)$fields[13],
+            'specials'       => self::boundedInt($fields[14], 1_000_000),
+            'highest_ep'     => self::boundedInt($fields[13], 1_000_000),
             'year'           => $yearStr,
             'year_int'       => $year,
             'type'           => $rawType,
             'categories'     => $categories,
             'rating'         => $ratingFloat,
-            'vote_count'     => (int)$fields[20],
-            'temp_rating'    => ((int)$fields[21]) / 100,
-            'temp_vote_count'=> (int)$fields[22],
-            'start_date'     => (int)$fields[15] ?: null,
-            'end_date'       => (int)$fields[16] ?: null,
-            'url'            => 'https://anidb.net/' . $fields[0],
+            'vote_count'     => self::boundedInt($fields[20], 100_000_000),
+            'temp_rating'    => self::boundedInt($fields[21], 1000) / 100,
+            'temp_vote_count'=> self::boundedInt($fields[22], 100_000_000),
+            'start_date'     => self::boundedInt($fields[15], 2_147_483_647) ?: null,
+            'end_date'       => self::boundedInt($fields[16], 2_147_483_647) ?: null,
+            'url'            => 'https://anidb.net/' . $aid,
             'picname'        => self::decode($fields[18]),
             'is_18plus'      => (int)$fields[26] === 1,
             // Extended fields (require additional API calls or enhanced mask)

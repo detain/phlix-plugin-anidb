@@ -19,13 +19,14 @@ use Socket;
  * recvfrom / close). Compared to the original inline implementation:
  *
  * - AF_INET / SOCK_DGRAM / SOL_UDP socket, SO_REUSEADDR set;
- * - bound to a fixed local port above 1024 to avoid AniDB's multi-port ban;
+ * - bound to a local port above 1024 (a preferred port, sliding across a small
+ *   window if taken) to keep a stable source port for AniDB;
  * - 10s send/receive timeouts via `socket_select()` (non-blocking poll) so the
  *   calling worker is never parked on `socket_recvfrom`;
  * - {@see send()} sendto's the datagram then uses `socket_select()` to wait
  *   for data availability before reading up to 1400 bytes, returning the trimmed
  *   payload (or null on timeout);
- * - {@see close()} closes the socket if open.
+ * - {@see close()} closes the socket if open and clears the bound port.
  *
  * The reply's source host/port are captured by {@see send()} for the caller —
  * {@see UdpClient} validates them against the expected AniDB endpoint
@@ -38,6 +39,16 @@ use Socket;
 final class SocketUdpClient implements UdpClientInterface
 {
     /**
+     * Number of consecutive local ports open() may try starting at localPort.
+     *
+     * AniDB requires one stable source port per session — not one *specific*
+     * port — so when the preferred port is already claimed (e.g. a second
+     * instance on the host) a small forward window lets open() find a free
+     * port instead of failing hard (review M-ANIDB-33).
+     */
+    private const BIND_PORT_WINDOW = 8;
+
+    /**
      * AniDB UDP API server hostname (datagram destination).
      */
     private string $host;
@@ -49,8 +60,15 @@ final class SocketUdpClient implements UdpClientInterface
 
     /**
      * Fixed local port to bind above 1024 (avoids AniDB multi-port ban).
+     *
+     * Preferred start of the bind window — see BIND_PORT_WINDOW.
      */
     private int $localPort;
+
+    /**
+     * The local port actually bound by open() (null until bound).
+     */
+    private ?int $boundPort = null;
 
     /**
      * Local UDP socket.
@@ -74,7 +92,8 @@ final class SocketUdpClient implements UdpClientInterface
     /**
      * @param string $host      AniDB UDP API hostname (default api.anidb.net).
      * @param int    $port      AniDB UDP API port (default 9000).
-     * @param int    $localPort Fixed local port to bind above 1024 (default 9001).
+     * @param int    $localPort Preferred local port to bind above 1024 (default 9001);
+     *                          open() slides forward across a small window if it is taken.
      */
     public function __construct(
         string $host = 'api.anidb.net',
@@ -89,9 +108,9 @@ final class SocketUdpClient implements UdpClientInterface
     /**
      * {@inheritDoc}
      *
-     * Preserves the original openSocket() behavior: create the datagram socket,
-     * set SO_REUSEADDR, bind to a fixed local port above 1024, and apply 10s
-     * send/receive timeouts.
+     * Creates the datagram socket, sets SO_REUSEADDR, binds to a local port
+     * above 1024 (the preferred port, sliding forward across a small window if
+     * it is already claimed), and applies 10s send/receive timeouts.
      */
     public function open(): void
     {
@@ -107,8 +126,11 @@ final class SocketUdpClient implements UdpClientInterface
         // Reuse local port to avoid triggering AniDB's multi-port ban detection
         socket_set_option($this->socket, SOL_SOCKET, SO_REUSEADDR, 1);
 
-        // Bind to a fixed local port above 1024 (AniDB requires one stable
-        // source port; per-packet ports trip its multi-port ban detection).
+        // Bind to a local port above 1024 (AniDB requires one stable source
+        // port per session; per-packet ports trip its multi-port ban
+        // detection). If the preferred port is taken, slide forward across a
+        // small window rather than fail — the rule is "a stable port", not
+        // "that exact port" (review M-ANIDB-33).
         //
         // Why the 0.0.0.0 wildcard is acceptable (review anidb__secaudit m4,
         // recorded there as hygiene with the compensation verified): the
@@ -121,10 +143,25 @@ final class SocketUdpClient implements UdpClientInterface
         // and port). Pinning a route-specific source address instead would
         // require a connect-probe dance against api.anidb.net at open() time —
         // the exposure is a listening port, never attacker-controlled input.
-        if (!@socket_bind($this->socket, '0.0.0.0', $this->localPort)) {
-            $err = socket_strerror(socket_last_error($this->socket));
+        $bound = false;
+        $lastError = '';
+        for ($attempt = 0; $attempt < self::BIND_PORT_WINDOW; $attempt++) {
+            $candidate = $this->localPort + $attempt;
+            if (@socket_bind($this->socket, '0.0.0.0', $candidate)) {
+                $this->boundPort = $candidate;
+                $bound = true;
+                break;
+            }
+            $lastError = socket_strerror(socket_last_error($this->socket));
+        }
+
+        if (!$bound) {
+            $windowEnd = $this->localPort + self::BIND_PORT_WINDOW - 1;
+            $err = $lastError;
             $this->close();
-            throw new \RuntimeException("Failed to bind UDP socket to port {$this->localPort}: {$err}");
+            throw new \RuntimeException(
+                "Failed to bind UDP socket to any port in window {$this->localPort}-{$windowEnd}: {$err}"
+            );
         }
 
         socket_set_option($this->socket, SOL_SOCKET, SO_RCVTIMEO, ['sec' => 10, 'usec' => 0]);
@@ -202,6 +239,15 @@ final class SocketUdpClient implements UdpClientInterface
             @socket_close($this->socket);
             $this->socket = null;
         }
+        $this->boundPort = null;
+    }
+
+    /**
+     * The local port actually bound by the last successful open(), or null.
+     */
+    public function boundPort(): ?int
+    {
+        return $this->boundPort;
     }
 
     /**

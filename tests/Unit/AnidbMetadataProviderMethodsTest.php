@@ -11,6 +11,7 @@ declare(strict_types=1);
 namespace Phlix\Anidb\Tests\Unit;
 
 use Phlix\Anidb\AnidbMetadataProvider;
+use Phlix\Anidb\Dto\AnimeDto;
 use Phlix\Anidb\Udp\UdpClient;
 use Phlix\Anidb\Udp\UdpClientInterface;
 use Phlix\Anidb\Udp\WaiterInterface;
@@ -409,10 +410,11 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
         $method = $reflection->getMethod('mapAnimeStatus');
         $method->setAccessible(true);
 
-        $anime = [
+        // M-ANIDB-21: the mapper boundary is the typed DTO, not a raw array.
+        $anime = AnimeDto::fromParsedArray([
             'start_date' => $startDate,
             'end_date' => $endDate,
-        ];
+        ]);
 
         $result = $method->invoke($provider, $anime);
         $this->assertSame($expected, $result);
@@ -503,7 +505,7 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
         $this->assertSame('/explicit/cache', $result);
     }
 
-    public function test_fetch_anime_description_returns_null_for_503_response(): void
+    public function test_describe_anime_classifies_503_as_definite_answer_not_failure(): void
     {
         $transport = new class implements UdpClientInterface {
             public bool $opened = false;
@@ -541,13 +543,16 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
             '503 ANIMEDESC FAILED',          // ANIMEDESC
         ];
 
-        // Use reflection to call fetchAnimeDescription
+        // M-ANIDB-26: describeAnime replaces the old text-only fetchAnimeDescription
+        // and must classify a definite server answer as "no text, but NOT a failure"
+        // (so fetchAnimeDetails does not retry it).
         $reflection = new \ReflectionClass($provider);
-        $method = $reflection->getMethod('fetchAnimeDescription');
+        $method = $reflection->getMethod('describeAnime');
         $method->setAccessible(true);
 
         $result = $method->invoke($provider, 1);
-        $this->assertNull($result);
+        $this->assertNull($result['text']);
+        $this->assertFalse($result['failed']);
     }
 
     public function test_find_aid_by_title_falls_back_to_udp_when_title_dump_returns_null(): void

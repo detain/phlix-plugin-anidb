@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 namespace Phlix\Anidb;
 
+use Phlix\Anidb\Dto\AnimeDto;
 use Phlix\Anidb\Parser\EpisodeExtractor;
 use Phlix\Anidb\Parser\FilenameTitleExtractor;
 use Phlix\Anidb\TitleDump\TitleDumpIndexer;
@@ -666,6 +667,7 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      *     studios: list<string>,
      *     source: string|null,
      *     is_movie: bool,
+     *     description_fetch_failed: bool,
      *     synonyms: list<string>,
      *     episode_number: int|null
      * }|array{} Matched anime metadata or empty array when not found.
@@ -773,6 +775,11 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     /**
      * Fetch full anime details from AniDB by AID.
      *
+     * The merged result always carries `description_fetch_failed`: true means
+     * the description could not be retrieved (transport failure, even after
+     * one retry), which is NOT the same as the server answering "no
+     * description" (review M-ANIDB-26).
+     *
      * @param int $aid AniDB anime ID.
      *
      * @return array<string, mixed>|null Parsed anime data or null on failure.
@@ -792,42 +799,60 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
             return null;
         }
 
-        // Fetch description separately (may be truncated to 1400 bytes)
-        $description = $this->fetchAnimeDescription($aid);
-        if ($description !== null) {
-            $anime['description'] = $description;
+        // Fetch description separately (may be truncated to 1400 bytes).
+        // A timeout/failed read is retried exactly once; a definite server
+        // answer (233 or error code) is never retried (M-ANIDB-26).
+        $describe = $this->describeAnime($aid);
+        if ($describe['failed']) {
+            $describe = $this->describeAnime($aid);
         }
+        if ($describe['text'] !== null) {
+            $anime['description'] = $describe['text'];
+        }
+        $anime['description_fetch_failed'] = $describe['failed'];
 
         return $anime;
     }
 
     /**
-     * Fetch the anime description via ANIMEDESC command.
+     * One ANIMEDESC round trip, classifying the outcome.
+     *
+     * `failed` distinguishes "we could not ask" (timeout, invalid-origin drop,
+     * malformed 233 payload) from "the server answered" (233 with empty text,
+     * or a non-233 response such as '503 ANIMEDESC FAILED').
      *
      * @param int $aid AniDB anime ID.
      *
-     * @return string|null Description text or null on failure.
+     * @return array{text: string|null, failed: bool}
      */
-    private function fetchAnimeDescription(int $aid): ?string
+    private function describeAnime(int $aid): array
     {
         $response = $this->sendCommand('ANIMEDESC aid=' . $aid . '&part=0');
 
-        if ($response === null || !str_starts_with(trim($response), '233')) {
-            return null;
+        if ($response === null) {
+            // No usable reply at all — absence of a description is unknown.
+            return ['text' => null, 'failed' => true];
+        }
+
+        if (!str_starts_with(trim($response), '233')) {
+            // The server answered this anime has no retrievable description
+            // part — a definite answer, nothing to retry.
+            return ['text' => null, 'failed' => false];
         }
 
         // Response format: "233 ANIMEDESC\n0|1|<description>"
         $lines = explode("\n", trim($response), 2);
         if (count($lines) < 2) {
-            return null;
+            return ['text' => null, 'failed' => true]; // 233 without payload
         }
 
         $parts = explode('|', $lines[1], 3);
         if (count($parts) < 3) {
-            return null;
+            return ['text' => null, 'failed' => true]; // malformed payload
         }
 
-        return $parts[2];
+        // Empty text after a well-formed 233 = honest "no description".
+        return ['text' => $parts[2] !== '' ? $parts[2] : null, 'failed' => false];
     }
 
     /**
@@ -868,33 +893,28 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     /**
      * Map a parsed AniDB anime array to the return shape expected by MetadataManager.
      *
+     * The parsed array crosses the typed AnimeDto boundary first (review
+     * anidb srphp item 2, estate batch W-min6): everything below reads
+     * DTO-typed properties — no blind array-key lookups.
+     *
      * @param array<string, mixed> $anime Parsed from parseAnimeResponse().
      *
      * @return array<string, mixed> Mapped metadata array.
      */
     private function mapToMetadataReturn(array $anime): array
     {
-        // Boundary parse (review M-ANIDB-20): the parser produces these fields
-        // as strings / list<string>, but the array crosses into this method as
-        // array<string,mixed> and the server may hand back any stale shape.
-        // Coerce at the seam instead of feeding mixed into array_merge.
-        $romaji = isset($anime['romaji']) && is_string($anime['romaji']) ? $anime['romaji'] : '';
-        $english = isset($anime['english']) && is_string($anime['english']) ? $anime['english'] : '';
-        $kanji = isset($anime['kanji']) && is_string($anime['kanji']) ? $anime['kanji'] : '';
-        $synonyms = isset($anime['synonyms']) && is_array($anime['synonyms'])
-            ? array_values(array_filter($anime['synonyms'], 'is_string'))
-            : [];
+        $dto = AnimeDto::fromParsedArray($anime);
 
         $allTitles = array_filter(array_merge(
-            [$romaji],
-            $english !== '' ? [$english] : [],
-            $kanji !== '' ? [$kanji] : [],
-            $synonyms
+            [$dto->romaji],
+            $dto->english !== '' ? [$dto->english] : [],
+            $dto->kanji !== '' ? [$dto->kanji] : [],
+            $dto->synonyms
         ));
 
         $posterUrl = null;
-        if (!empty($anime['picname'])) {
-            $whitelisted = $this->validateImageFilename($anime['picname']);
+        if ($dto->picname !== '') {
+            $whitelisted = $this->validateImageFilename($dto->picname);
             if ($whitelisted !== null) {
                 // AniDB serves anime images from its image CDN, NOT the API host
                 // (api.anidb.net is UDP/HTTP-API only and 404s image paths).
@@ -902,30 +922,32 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
             }
         }
 
-        $type = is_string($anime['type']) ? $this->mapType($anime['type']) : null;
+        $type = $this->mapType($dto->type);
 
         return [
-            'title'         => $romaji,
-            'original_name' => $english !== '' ? $english : ($kanji !== '' ? $kanji : null),
-            'overview'     => $anime['description'] ?? null,
-            'year'         => $anime['year_int'] ?? null,
-            'genres'       => $anime['categories'], // honest empty: amask excludes AniDB categories
-            'rating'       => $anime['rating'],
-            'vote_count'   => $anime['vote_count'],
-            'poster_url'   => $posterUrl,
-            'fanart_url'   => null,
-            'episodes'     => $anime['episodes'] ?: null,
-            'type'         => $type,
-            'anidb_id'     => $anime['aid'],
-            'titles'       => array_values(array_unique($allTitles)),
-            'status'       => $this->mapAnimeStatus($anime),
-            'runtime_ticks'=> null, // AniDB doesn't provide episode length in basic response
-            'studio'       => null, // AniDB has no studio field; its studio data lives in categories (unfetched)
+            'title'         => $dto->romaji,
+            'original_name' => $dto->english !== '' ? $dto->english : ($dto->kanji !== '' ? $dto->kanji : null),
+            'overview'      => $dto->description,
+            'year'          => $dto->year_int,
+            'genres'        => $dto->categories, // honest empty: amask excludes AniDB categories
+            'rating'        => $dto->rating,
+            'vote_count'    => $dto->vote_count,
+            'poster_url'    => $posterUrl,
+            'fanart_url'    => null,
+            'episodes'      => $dto->episodes ?: null,
+            'type'          => $type,
+            'anidb_id'      => $dto->aid,
+            'titles'        => array_values(array_unique($allTitles)),
+            'status'        => $this->mapAnimeStatus($dto),
+            'runtime_ticks' => null, // AniDB doesn't provide episode length in basic response
+            'studio'        => null, // AniDB has no studio field; its studio data lives in categories (unfetched)
             // P9-S5: Extended anime-specific fields
-            'studios'      => $anime['studios'] ?? [],
-            'source'       => $anime['source'] ?? null,
-            'is_movie'     => $anime['is_movie'] ?? ($type === 'movie'),
-            'synonyms'     => $synonyms,
+            'studios'       => $dto->studios,
+            'source'        => $dto->source,
+            'is_movie'      => $dto->is_movie,
+            'synonyms'      => $dto->synonyms,
+            // M-ANIDB-26: "description could not be fetched" ≠ "no description".
+            'description_fetch_failed' => $dto->description_fetch_failed,
         ];
     }
 
@@ -937,14 +959,14 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      * air_date/end_date into start_date/end_date). Every arm returns a
      * status — there is no null outcome.
      *
-     * @param array<string, mixed> $anime Parsed anime fields.
+     * @param AnimeDto $dto Typed parser→mapper boundary value.
      *
      * @return string One of 'Upcoming', 'Currently Airing', 'Finished'.
      */
-    private function mapAnimeStatus(array $anime): string
+    private function mapAnimeStatus(AnimeDto $dto): string
     {
-        $startDate = $anime['start_date'] ?? 0;
-        $endDate = $anime['end_date'] ?? 0;
+        $startDate = $dto->start_date ?? 0;
+        $endDate = $dto->end_date ?? 0;
         $now = time();
 
         if ($startDate === 0) {

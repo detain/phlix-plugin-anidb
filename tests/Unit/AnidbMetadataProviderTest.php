@@ -11,6 +11,7 @@ declare(strict_types=1);
 namespace Phlix\Anidb\Tests\Unit;
 
 use Phlix\Anidb\AnidbMetadataProvider;
+use Phlix\Anidb\Dto\AnimeDto;
 use Phlix\Shared\Metadata\MetadataSourceInterface;
 use PHPUnit\Framework\TestCase;
 
@@ -186,10 +187,11 @@ final class AnidbMetadataProviderTest extends TestCase
         $method = $reflection->getMethod('mapAnimeStatus');
         $method->setAccessible(true);
 
-        $anime = [
+        // M-ANIDB-21: the mapper boundary is the typed DTO, not a raw array.
+        $anime = AnimeDto::fromParsedArray([
             'start_date' => $startDate,
             'end_date' => $endDate,
-        ];
+        ]);
 
         $result = $method->invoke($provider, $anime);
 

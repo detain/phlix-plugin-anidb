@@ -262,6 +262,76 @@ final class AnimeResponseParserTest extends TestCase
         $this->assertSame('https://anidb.net/12345', $result['url']);
     }
 
+    // ------------------------------------------------------------------
+    // M-ANIDB-16 (review anidb secaudit #3): the aid was interpolated raw
+    // into `url` and uncapped int casts overflowed extreme digit columns
+    // to PHP_INT_MAX. aid is now validated at the boundary and derived
+    // numerics are bounded.
+    // ------------------------------------------------------------------
+
+    public function test_parse_rejects_non_digit_aid(): void
+    {
+        $response = $this->buildFullResponse(['aid' => '73a']);
+        $this->assertNull($this->parser->parseAnimeResponse($response));
+    }
+
+    public function test_parse_rejects_zero_aid(): void
+    {
+        $response = $this->buildFullResponse(['aid' => '0']);
+        $this->assertNull($this->parser->parseAnimeResponse($response));
+    }
+
+    public function test_parse_rejects_aid_above_anidb_maximum(): void
+    {
+        $response = $this->buildFullResponse(['aid' => '10000001']);
+        $this->assertNull($this->parser->parseAnimeResponse($response));
+    }
+
+    public function test_parse_rejects_digit_overflow_aid(): void
+    {
+        // 1,400 nines: the old (int) cast overflowed to a wrapped value
+        // and shipped it inside the url. Now the length guard rejects it.
+        $response = $this->buildFullResponse(['aid' => str_repeat('9', 1400)]);
+        $this->assertNull($this->parser->parseAnimeResponse($response));
+    }
+
+    public function test_parse_url_is_canonical_from_validated_aid(): void
+    {
+        $response = $this->buildFullResponse(['aid' => '007']);
+        $result = $this->parser->parseAnimeResponse($response);
+
+        $this->assertNotNull($result);
+        $this->assertSame(7, $result['aid']);
+        $this->assertSame('https://anidb.net/7', $result['url']);
+    }
+
+    public function test_parse_oversized_vote_count_collapses_to_zero_not_overflow(): void
+    {
+        $response = $this->buildFullResponse(['vote_count' => str_repeat('9', 25)]);
+        $result = $this->parser->parseAnimeResponse($response);
+
+        $this->assertNotNull($result);
+        $this->assertSame(0, $result['vote_count']);
+    }
+
+    public function test_parse_oversized_year_yields_null_year_int(): void
+    {
+        $response = $this->buildFullResponse(['year' => '99999']);
+        $result = $this->parser->parseAnimeResponse($response);
+
+        $this->assertNotNull($result);
+        $this->assertNull($result['year_int']);
+    }
+
+    public function test_parse_non_digit_episodes_collapses_to_zero(): void
+    {
+        $response = $this->buildFullResponse(['episodes' => '12x']);
+        $result = $this->parser->parseAnimeResponse($response);
+
+        $this->assertNotNull($result);
+        $this->assertSame(0, $result['episodes']);
+    }
+
     /**
      * Build a full 230 ANIME response with all 27 fields.
      */

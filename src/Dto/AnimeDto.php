@@ -14,14 +14,13 @@ namespace Phlix\Anidb\Dto;
  * Data Transfer Object representing parsed anime data from AniDB.
  *
  * Mirrors the output shape of {@see \Phlix\Anidb\AnimeResponseParser::parseAnimeResponse()}
- * EXCEPT the computed `is_movie` field, which this DTO does not carry.
+ * INCLUDING the computed `is_movie` field, plus the two fields the provider
+ * attaches after parsing (`description`, `description_fetch_failed`).
  *
- * As-shipped truth: it is NOT wired into the production mapping —
- * {@see \Phlix\Anidb\AnidbMetadataProvider::mapToMetadataReturn()} maps the
- * parsed array directly and never constructs a DTO, so `fromParsedArray()` is
- * exercised only by tests/Unit/AnimeDtoTest.php. The wire-or-delete decision
- * is tracked upstream (review anidb__srphp item 3, estate batch W-min5); this
- * docblock records today's state, not an intended future.
+ * This is THE parser→mapper boundary (review anidb srphp item 2, estate batch
+ * W-min6): {@see \Phlix\Anidb\AnidbMetadataProvider::mapToMetadataReturn()}
+ * builds a DTO via {@see fromParsedArray()} and reads only typed properties —
+ * no blind array-key lookups below the seam.
  *
  * @package Phlix\Anidb\Dto
  */
@@ -52,6 +51,10 @@ readonly class AnimeDto
      * @param bool $is_18plus Whether the anime is 18+ restricted.
      * @param list<string> $studios List of studios/production companies (populated via separate API call).
      * @param string|null $source The source material (e.g. "manga", "light novel", "original").
+     * @param string|null $description ANIMEDESC text, or null when absent/not fetched.
+     * @param bool $is_movie Parser-computed movie detection flag.
+     * @param bool $description_fetch_failed True when the description could not be
+     *        retrieved (transport failure) — distinct from "server answered: none".
      */
     public function __construct(
         public int $aid,
@@ -78,6 +81,9 @@ readonly class AnimeDto
         public bool $is_18plus,
         public array $studios = [],
         public ?string $source = null,
+        public ?string $description = null,
+        public bool $is_movie = false,
+        public bool $description_fetch_failed = false,
     ) {
     }
 
@@ -115,6 +121,9 @@ readonly class AnimeDto
             is_18plus: self::toBool($data['is_18plus'] ?? null),
             studios: self::toListOfStrings($data['studios'] ?? null),
             source: self::toNullableString($data['source'] ?? null),
+            description: self::toNullableString($data['description'] ?? null),
+            is_movie: self::toBool($data['is_movie'] ?? false),
+            description_fetch_failed: self::toBool($data['description_fetch_failed'] ?? false),
         );
     }
 

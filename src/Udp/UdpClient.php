@@ -53,6 +53,11 @@ final class UdpClient
     private const API_PORT = 9000;
 
     /**
+     * Max bytes of an unexpected AUTH-failure body kept in an exception.
+     */
+    private const AUTH_FAILURE_BODY_MAX = 120;
+
+    /**
      * Active AniDB session key (null if not authenticated).
      */
     private ?string $sessionKey = null;
@@ -346,7 +351,27 @@ final class UdpClient
             return new \RuntimeException('AniDB AUTH failed: Banned — ' . substr($response, 4));
         }
 
-        return new \RuntimeException('AniDB AUTH failed: ' . $response);
+        return new \RuntimeException('AniDB AUTH failed: ' . self::scrubAuthFailureBody($response));
+    }
+
+    /**
+     * Sanitize an unexpected AUTH datagram for embedding in an exception.
+     *
+     * The generic failure arm sees whatever bytes arrived; a malformed or
+     * interleaved reply can still carry `200/201 <session-key>` frames
+     * (review M-ANIDB-29). Keys are redacted, whitespace collapsed, and the
+     * body bounded so logs never capture credentials or unbounded payloads.
+     */
+    private static function scrubAuthFailureBody(string $response): string
+    {
+        $collapsed = (string) preg_replace('/\s+/u', ' ', $response);
+        $scrubbed = (string) preg_replace('/\b(200|201)\s+\S+/', '$1 [session-key-redacted]', $collapsed);
+
+        if (strlen($scrubbed) > self::AUTH_FAILURE_BODY_MAX) {
+            return substr($scrubbed, 0, self::AUTH_FAILURE_BODY_MAX) . '…';
+        }
+
+        return $scrubbed;
     }
 
     /**

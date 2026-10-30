@@ -500,6 +500,48 @@ final class AnidbUdpSeamTest extends TestCase
         $this->assertInstanceOf(\RuntimeException::class, $exception);
         $this->assertStringContainsString('AniDB AUTH failed', $exception->getMessage());
     }
+
+    // ------------------------------------------------------------------
+    // M-ANIDB-29 (review anidb srphp #11): the generic AUTH-failure arm
+    // embedded the raw datagram in the exception message — a body can
+    // carry '200/201 <session-key>' frames. Keys are now redacted and
+    // the body bounded.
+    // ------------------------------------------------------------------
+
+    public function test_parse_auth_failure_generic_arm_redacts_session_key(): void
+    {
+        $udp = new FakeUdpClient([]);
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+
+        $exception = $client->parseAuthFailure(
+            "999 AUTH WEIRD\n200 SUPERSECRETSESSIONKEY LOGIN ACCEPTED\nextra noise"
+        );
+        $message = $exception->getMessage();
+
+        $this->assertStringNotContainsString('SUPERSECRETSESSIONKEY', $message);
+        $this->assertStringContainsString('[session-key-redacted]', $message);
+        // Whitespace collapsed so a multi-line datagram never leaks structure.
+        $this->assertStringContainsString('999 AUTH WEIRD 200 [session-key-redacted] LOGIN ACCEPTED extra noise', $message);
+    }
+
+    public function test_parse_auth_failure_generic_arm_truncates_oversized_body(): void
+    {
+        $udp = new FakeUdpClient([]);
+        $waiter = new NoOpWaiter();
+
+        $client = $this->makeUdpClient($udp, $waiter);
+
+        $exception = $client->parseAuthFailure('999 ERROR ' . str_repeat('x', 500));
+        $message = $exception->getMessage();
+
+        $this->assertStringContainsString('…', $message);
+        $this->assertLessThanOrEqual(
+            strlen('AniDB AUTH failed: ') + 120 + strlen('…'),
+            strlen($message)
+        );
+    }
 }
 
 /**

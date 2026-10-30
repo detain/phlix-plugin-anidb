@@ -110,6 +110,30 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
   `70f3874` — recorded, not re-edited. Suite 395→397 tests,
   1200→1214 assertions (one builder pin re-cut to the new law, two new
   pins).
+- Review-campaign minors cluster (W-min6, five items — the last queued
+  anidb minors batch; secaudit/srphp lenses): `AnimeResponseParser` now
+  validates the AID digit column at the boundary (digits only, 1..10,000,000,
+  whole-parse rejection) so `url` is never built from raw or overflowed wire
+  bytes, and every derived numeric goes through a bounded cast that
+  collapses non-digit/oversized columns to 0 instead of overflowing to
+  `PHP_INT_MAX` (M-ANIDB-16). `AnimeDto` became THE parser→mapper boundary:
+  it carries `description`, `is_movie` and `description_fetch_failed`, and
+  `mapToMetadataReturn()`/`mapAnimeStatus()` read only typed DTO properties
+  — the blind `array<string,mixed>` key lookups are gone (M-ANIDB-21).
+  ANIMEDESC now distinguishes "we could not ask" from "the server answered:
+  none": timeouts/malformed 233 payloads are retried exactly once and, if
+  still failing, surface as `description_fetch_failed: true` on the lookup
+  return, while definite answers ('503', well-formed-empty) are never
+  retried — the text-only `fetchAnimeDescription()` seam retired into the
+  classifying `describeAnime()` (M-ANIDB-26). The generic `parseAuthFailure`
+  arm no longer interpolates the raw datagram: session keys inside
+  unexpected `200/201 <key>` frames are redacted and the message body
+  bounded to 120 bytes (M-ANIDB-29). `SocketUdpClient::open()` binds its
+  preferred port and slides across an 8-port window on collision — a second
+  instance on one host no longer deterministically trips the M4
+  permanent-death path — with the actually-bound port exposed via
+  `boundPort()` (M-ANIDB-33). Suite 397→419 tests, 1214→1296 assertions
+  (22 new pins, three re-cuts).
 
 ### Maintenance eras (post-0.4.1, moving main)
 - S246: whole-lock security audit gate (require + require-dev) — `0860a64`

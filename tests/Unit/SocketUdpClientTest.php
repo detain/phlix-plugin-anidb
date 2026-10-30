@@ -194,4 +194,79 @@ final class SocketUdpClientTest extends TestCase
         $this->expectException(\RuntimeException::class);
         $client->send('TEST');
     }
+
+    // ------------------------------------------------------------------
+    // M-ANIDB-33 (review anidb srphp #15): a single hard-coded bind port
+    // made a second instance on the same host die deterministically.
+    // open() now slides over a small preferred-port window and exposes
+    // the port it actually bound.
+    // ------------------------------------------------------------------
+
+    /**
+     * @requires extension sockets
+     */
+    public function test_open_falls_back_to_next_port_in_window_when_preferred_is_taken(): void
+    {
+        // Blocker WITHOUT SO_REUSEADDR: a later SO_REUSEADDR bind on the same
+        // port still fails (EADDRINUSE) — the deterministic collision shape.
+        $blocker = @socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
+        $this->assertNotFalse($blocker, 'socket_create for blocker failed');
+        $bound = @socket_bind($blocker, '0.0.0.0', 19201);
+        $this->assertTrue($bound, 'blocker failed to bind 19201');
+
+        $client = new SocketUdpClient('api.anidb.net', 9000, 19201);
+
+        try {
+            $client->open();
+
+            $this->assertSame(19202, $client->boundPort(), 'expected the bind to slide one port');
+        } finally {
+            $client->close();
+            @socket_close($blocker);
+        }
+    }
+
+    /**
+     * @requires extension sockets
+     */
+    public function test_bound_port_is_null_after_close(): void
+    {
+        $client = new SocketUdpClient('api.anidb.net', 9000, 19211);
+
+        try {
+            $client->open();
+            $this->assertNotNull($client->boundPort());
+        } finally {
+            $client->close();
+        }
+
+        $this->assertNull($client->boundPort());
+    }
+
+    /**
+     * @requires extension sockets
+     */
+    public function test_open_throws_when_entire_bind_window_is_taken(): void
+    {
+        /** @var list<\Socket> $blockers */
+        $blockers = [];
+
+        try {
+            for ($port = 19301; $port <= 19308; $port++) {
+                $blocker = @socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
+                $this->assertNotFalse($blocker, 'socket_create for blocker failed');
+                $this->assertTrue(@socket_bind($blocker, '0.0.0.0', $port), "blocker bind {$port} failed");
+                $blockers[] = $blocker;
+            }
+
+            $client = new SocketUdpClient('api.anidb.net', 9000, 19301);
+
+            $this->expectException(\RuntimeException::class);
+            $client->open();
+        } finally {
+            foreach ($blockers as $blocker) {
+                @socket_close($blocker);
+            }
+        }
+    }
 }

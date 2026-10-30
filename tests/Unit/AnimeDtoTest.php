@@ -530,4 +530,41 @@ final class AnimeDtoTest extends TestCase
         ]);
         $this->assertSame([], $dto->studios);
     }
+
+    // ------------------------------------------------------------------
+    // M-ANIDB-21 / M-ANIDB-26 (review anidb srphp #2): the DTO becomes the
+    // parser→mapper boundary, so it must carry the three fields the mapper
+    // reads that were previously blind key lookups: description, is_movie,
+    // and the description fetch-failure flag.
+    // ------------------------------------------------------------------
+
+    public function test_from_parsed_array_carries_description_and_flags(): void
+    {
+        $dto = AnimeDto::fromParsedArray([
+            'aid' => 1,
+            'description' => 'A space opera.',
+            'is_movie' => true,
+            'description_fetch_failed' => true,
+        ]);
+
+        $this->assertSame('A space opera.', $dto->description);
+        $this->assertTrue($dto->is_movie);
+        $this->assertTrue($dto->description_fetch_failed);
+    }
+
+    public function test_from_parsed_array_defaults_description_and_flags_when_absent(): void
+    {
+        $dto = AnimeDto::fromParsedArray(['aid' => 1]);
+
+        $this->assertNull($dto->description);
+        $this->assertFalse($dto->is_movie);
+        $this->assertFalse($dto->description_fetch_failed);
+    }
+
+    public function test_is_movie_reads_the_parser_key(): void
+    {
+        $dto = AnimeDto::fromParsedArray(['aid' => 1, 'is_movie' => false]);
+
+        $this->assertFalse($dto->is_movie);
+    }
 }

@@ -32,27 +32,32 @@ final class FilenameTitleExtractor
     {
         $filename = pathinfo($filePath, PATHINFO_FILENAME);
 
+        // preg_replace() only returns null on pattern/subject errors (impossible
+        // for these literal patterns on a string subject), but its signature is
+        // string|null — the ?? chain keeps every step honestly string-typed
+        // (review M-ANIDB-20) instead of silencing phpstan with an ignore.
+        $clean = preg_replace('/\[[^\]]+\]/', '', $filename) ?? $filename;
+
         // Strip common release group patterns: [GroupName], Group-Name, etc.
-        $clean = preg_replace('/\[[^\]]+\]/', '', $filename);
-        $clean = preg_replace('/\(TX\)/', '', $clean);
-        $clean = preg_replace('/\([^\)]+\)/', '', $clean);
+        $clean = preg_replace('/\(TX\)/', '', $clean) ?? $clean;
+        $clean = preg_replace('/\([^\)]+\)/', '', $clean) ?? $clean;
 
         // Strip episode patterns: S01E02, 01x02, Episode 01, Episode.01, standalone 01, 1000
-        $clean = preg_replace('/[Ss]\d{1,2}[Ee]\d{1,4}/', '', $clean);
-        $clean = preg_replace('/\d{1,2}[Xx]\d{1,4}/', '', $clean);
-        $clean = preg_replace('/[.\- _]*[Ee]p?[i]?[t]?[.]?\d{1,4}/i', '', $clean);
+        $clean = preg_replace('/[Ss]\d{1,2}[Ee]\d{1,4}/', '', $clean) ?? $clean;
+        $clean = preg_replace('/\d{1,2}[Xx]\d{1,4}/', '', $clean) ?? $clean;
+        $clean = preg_replace('/[.\- _]*[Ee]p?[i]?[t]?[.]?\d{1,4}/i', '', $clean) ?? $clean;
         // Strip standalone episode numbers: leading ., -, _, space before 1-4 digits
-        $clean = preg_replace('/[.\- ][0-9]{1,4}$/', '', $clean);
+        $clean = preg_replace('/[.\- ][0-9]{1,4}$/', '', $clean) ?? $clean;
 
         // Strip common suffixes: 720p, 1080p, BluRay, HDTV, etc.
-        $clean = preg_replace('/(720p|1080p|2160p|480p|BluRay|BRRip|HDRip|HDTV|DVDRip|x264|x265|HEVC|AAC|AC3)/i', '', $clean);
+        $clean = preg_replace('/(720p|1080p|2160p|480p|BluRay|BRRip|HDRip|HDTV|DVDRip|x264|x265|HEVC|AAC|AC3)/i', '', $clean) ?? $clean;
 
         // Strip year patterns: (2016), 2001, 2023 (at end of string)
-        $clean = preg_replace('/\(\d{4}\)/', '', $clean);
-        $clean = preg_replace('/\s+\d{4}$/', '', $clean);
+        $clean = preg_replace('/\(\d{4}\)/', '', $clean) ?? $clean;
+        $clean = preg_replace('/\s+\d{4}$/', '', $clean) ?? $clean;
 
         // Strip resolution and codec patterns
-        $clean = preg_replace('/\d{3,4}[xX]\d{3,4}/', '', $clean);
+        $clean = preg_replace('/\d{3,4}[xX]\d{3,4}/', '', $clean) ?? $clean;
 
         // Strip leading/trailing dashes, dots, underscores, spaces
         $clean = trim($clean, '.-_ ');
@@ -65,6 +70,8 @@ final class FilenameTitleExtractor
             return null;
         }
 
-        return $clean ?: null;
+        // The strlen guard above already proves non-empty: the old
+        // `$clean ?: null` arm was dead code (phpstan ternary.alwaysTrue).
+        return $clean;
     }
 }

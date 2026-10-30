@@ -4,78 +4,16 @@ parameters:
         - src
     bootstrapFiles:
         - vendor/autoload.php
+        # Host-interface stub so src/AnidbMetadataProviderAdapter.php analyzes
+        # against the real contract instead of an unknown parent (it is a
+        # test/analysis-only stand-in for phlix-server's interface).
+        - tests/Stub/MetadataProviderInterface.php
     treatPhpDocTypesAsCertain: false
-    excludePaths:
-        - src/AnidbMetadataProviderAdapter.php
-    ignoreErrors:
-        -
-            message: '#^Method Phlix\\Anidb\\AnidbMetadataProvider\:\:mapAnimeStatus\(\) never returns null so it can be removed from the return type\.$#'
-            identifier: return.unusedType
-            count: 1
-            path: src/AnidbMetadataProvider.php
 
-        -
-            message: '#^Parameter \#1 \$array of function array_unique expects an array of values castable to string, array\<mixed, mixed\> given\.$#'
-            identifier: argument.type
-            count: 1
-            path: src/AnidbMetadataProvider.php
-
-        -
-            message: '#^Parameter \#4 \.\.\.\$arrays of function array_merge expects array, mixed given\.$#'
-            identifier: argument.type
-            count: 1
-            path: src/AnidbMetadataProvider.php
-
-        -
-            message: '#^Property Phlix\\Anidb\\AnidbMetadataProvider\:\:\$container is never read, only written\.$#'
-            identifier: property.onlyWritten
-            count: 1
-            path: src/AnidbMetadataProvider.php
-
-        -
-            message: '#^Parameter \#1 \$string of function trim expects string, string\|null given\.$#'
-            identifier: argument.type
-            count: 1
-            path: src/Parser/FilenameTitleExtractor.php
-
-        -
-            message: '#^Parameter \#3 \$subject of function preg_replace expects array\<float\|int\|string\>|string, string\|null given\.$#'
-            identifier: argument.type
-            count: 10
-            path: src/Parser/FilenameTitleExtractor.php
-
-        -
-            message: '#^Ternary operator condition is always true\.$#'
-            identifier: ternary.alwaysTrue
-            count: 1
-            path: src/Parser/FilenameTitleExtractor.php
-
-        -
-            message: '#^Parameter \#1 \$socket of function socket_close expects Socket, resource given\.$#'
-            identifier: argument.type
-            count: 1
-            path: src/Udp/SocketUdpClient.php
-
-        -
-            message: '#^Parameter \#1 \$socket of function socket_recvfrom expects Socket, resource given\.$#'
-            identifier: argument.type
-            count: 1
-            path: src/Udp/SocketUdpClient.php
-
-        -
-            message: '#^Parameter \#1 \$socket of function socket_sendto expects Socket, resource given\.$#'
-            identifier: argument.type
-            count: 1
-            path: src/Udp/SocketUdpClient.php
-
-        -
-            message: '#^Property Phlix\\Anidb\\Udp\\SocketUdpClient\:\:\$socket \(resource\|null\) does not accept Socket\|false\.$#'
-            identifier: assign.propertyType
-            count: 1
-            path: src/Udp/SocketUdpClient.php
-
-        -
-            message: '#^Property Phlix\\Anidb\\Udp\\SocketUdpClient\:\:\$socket \(resource\|null\) is never assigned resource so it can be removed from the property type\.$#'
-            identifier: property.unusedType
-            count: 1
-            path: src/Udp/SocketUdpClient.php
+    # Review M-ANIDB-20: the former excludePaths (the adapter) and the 13
+    # ignoreErrors blocks were REAL fixes — typed boundary parsing in
+    # mapToMetadataReturn, the never-null mapAnimeStatus return, removal of the
+    # write-only $container property, `?? $clean` preg chains, the true ?Socket
+    # property type — all shipped in this release line. There are zero
+    # suppressions left; adding one re-introduces exactly what the review
+    # flagged.

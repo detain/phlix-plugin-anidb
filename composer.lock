@@ -4,20 +4,20 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "b2e8010b094f6f65c12b99b15e82f72a",
+    "content-hash": "ffe412a2645cb284762590786a39000c",
     "packages": [
         {
             "name": "detain/phlix-shared",
-            "version": "0.21.0",
+            "version": "v0.52.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/detain/phlix-shared.git",
-                "reference": "129946521f64182d5337f56f5617e05ba8d3bcde"
+                "reference": "febd8af577d70644fd2686084010b514b002c1ed"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/detain/phlix-shared/zipball/129946521f64182d5337f56f5617e05ba8d3bcde",
-                "reference": "129946521f64182d5337f56f5617e05ba8d3bcde",
+                "url": "https://api.github.com/repos/detain/phlix-shared/zipball/febd8af577d70644fd2686084010b514b002c1ed",
+                "reference": "febd8af577d70644fd2686084010b514b002c1ed",
                 "shasum": ""
             },
             "require": {
@@ -51,9 +51,9 @@
             "description": "Shared interfaces, DTOs, event names, and protocol types used by both phlix-server and phlix-hub. Composer-installable, PHP 8.3+, zero I/O by charter — the only bundled network code is the blocking CurlArrTransport (CLI/test only); event-loop consumers MUST inject an async ArrTransportInterface.",
             "support": {
                 "issues": "https://github.com/detain/phlix-shared/issues",
-                "source": "https://github.com/detain/phlix-shared/tree/v0.21.0"
+                "source": "https://github.com/detain/phlix-shared/tree/v0.52.0"
             },
-            "time": "2026-07-20T16:32:01+00:00"
+            "time": "2026-10-07T01:21:46+00:00"
         },
         {
             "name": "psr/clock",
@@ -495,11 +495,11 @@
         },
         {
             "name": "phpstan/phpstan",
-            "version": "2.3.1",
+            "version": "2.3.4",
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/6155239b488e95d26d1ebd95c6b4bb294d7f09db",
-                "reference": "6155239b488e95d26d1ebd95c6b4bb294d7f09db",
+                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/f20ce6f3c82556cfcfc086b152445a12d1d64fff",
+                "reference": "f20ce6f3c82556cfcfc086b152445a12d1d64fff",
                 "shasum": ""
             },
             "require": {
@@ -555,7 +555,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-10-08T21:09:11+00:00"
+            "time": "2026-10-28T22:38:53+00:00"
         },
         {
             "name": "phpunit/php-code-coverage",
@@ -1981,7 +1981,10 @@
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {
-        "php": ">=8.3"
+        "php": ">=8.3",
+        "ext-mbstring": "*",
+        "ext-sockets": "*",
+        "ext-zlib": "*"
     },
     "platform-dev": {},
     "plugin-api-version": "2.9.0"

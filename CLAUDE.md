@@ -27,7 +27,7 @@ php scripts/security-audit-check.php        # blocking security gate: composer a
 ## Architecture
 
 - **Entry**: `src/AnidbMetadataProvider.php` — FQCN `Phlix\Anidb\AnidbMetadataProvider`, declared as `entry` in `plugin.json`.
-- **Contract**: implements `LifecycleInterface` + `MetadataSourceInterface` from `detain/phlix-shared` ^0.21; `subscribedEvents()` returns `[]`, plus `lookup(string $filePath): array`.
+- **Contract**: implements `LifecycleInterface` + `MetadataSourceInterface` from `detain/phlix-shared` ^0.52; `subscribedEvents()` returns `[]`, plus `lookup(string $filePath): array`.
 - **Host adapter**: `src/AnidbMetadataProviderAdapter.php` implements the server-side `Phlix\Media\Metadata\MetadataProviderInterface` (`search()`/`getDetails()`/`getImages()`) and is registered with the host MetadataManager from `onEnable()`.
 - **Seams** (constructor-injected, all default-constructed): `src/Udp/UdpClient.php` (AUTH, session key, flood protection, `506` retry) over `src/Udp/UdpClientInterface.php` (`src/Udp/SocketUdpClient.php`), `src/Udp/WaiterInterface.php` (`src/Udp/ProductionWaiter.php`), `src/AnimeResponseParser.php`, `src/Parser/FilenameTitleExtractor.php`, `src/Parser/EpisodeExtractor.php`, `src/TitleDump/TitleDumpManager.php`, DTO `src/Dto/AnimeDto.php`.
 - **Lookup flow** (`lookup()`): `FilenameTitleExtractor::extract()` → `ensureConnected()` (lazy, never at boot) → `EpisodeExtractor::extract()` → `TitleDumpManager::search()` → fallback `ANIME aname=` UDP call → `AnimeResponseParser::parseAnimeResponse()` → `mapToMetadataReturn()` / `mapAnimeStatus()`.

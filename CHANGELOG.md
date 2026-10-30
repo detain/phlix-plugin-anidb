@@ -71,6 +71,28 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
   any non-http(s) `title_dump_url` scheme at the boundary without echoing the
   URL (M-ANIDB-28).
   Suite 371→395 tests, 1110→1200 assertions.
+- Review-campaign minors cluster (W-min4, four items, srphp/devops lenses):
+  `composer.json` now declares the extensions the code actually uses
+  (`ext-sockets`, `ext-zlib`, `ext-mbstring`), drops the unused direct
+  `psr/log` (it remains transitively via `detain/phlix-shared`), and raises
+  `detain/phlix-shared` to `^0.52.0` — the `MetadataSourceInterface` /
+  `LifecycleInterface` method sets are identical between 0.21 and 0.52, so
+  the plugin source is untouched by the bump. The README gained a
+  Requirements section stating the Workerman soft-dependency law (host-
+  provided, `class_exists`-guarded, deliberately never a composer require)
+  (M-ANIDB-11, M-ANIDB-32). `phpstan.neon` is now zero-suppression: the 13
+  `ignoreErrors` blocks (21 instances) and the
+  `AnidbMetadataProviderAdapter` exclusion are all replaced by real fixes —
+  `mapAnimeStatus` returns `string` (no null arm ever existed),
+  `mapToMetadataReturn` parses `romaji`/`english`/`kanji`/`synonyms` at the
+  boundary instead of blind mixed derefs, the write-only `$container`
+  property was deleted, `FilenameTitleExtractor` chains `?? $clean` on every
+  preg step and dropped its dead final ternary, `SocketUdpClient` types the
+  socket as PHP 8's `Socket` object (the old `resource` annotations
+  described a type that has not existed since PHP 8.0), and the adapter is
+  analyzed against `tests/Stub/MetadataProviderInterface.php` (M-ANIDB-20;
+  M-ANIDB-12 cured-by-truth — the README/AGENTS "level 9" claim now covers
+  all of `src/` with nothing hidden). Suite 395 tests held.
 
 ### Maintenance eras (post-0.4.1, moving main)
 - S246: whole-lock security audit gate (require + require-dev) — `0860a64`

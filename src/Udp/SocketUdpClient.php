@@ -10,6 +10,8 @@ declare(strict_types=1);
 
 namespace Phlix\Anidb\Udp;
 
+use Socket;
+
 /**
  * Default, production {@see UdpClientInterface} implementation.
  *
@@ -51,11 +53,13 @@ final class SocketUdpClient implements UdpClientInterface
     private int $localPort;
 
     /**
-     * Local UDP socket resource.
+     * Local UDP socket.
      *
-     * @var resource|null
+     * PHP 8's socket_create() returns a Socket instance (not a resource) —
+     * the previous `@var resource|null` fiction was what five phpstan
+     * Socket-vs-resource ignores papered over (review M-ANIDB-20).
      */
-    private $socket = null;
+    private ?Socket $socket = null;
 
     /**
      * Source host of the most recently received reply (null until first reply).
@@ -91,11 +95,14 @@ final class SocketUdpClient implements UdpClientInterface
      */
     public function open(): void
     {
-        $this->socket = @socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
-        if ($this->socket === false) {
-            $this->socket = null;
+        // socket_create() returns Socket|false on PHP 8; the failure is handled
+        // through a local so `false` is never assigned to the ?Socket property
+        // (the old @var resource|null fiction is what the phpstan ignores hid).
+        $socket = @socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
+        if ($socket === false) {
             throw new \RuntimeException('Failed to create UDP socket: ' . socket_strerror(socket_last_error()));
         }
+        $this->socket = $socket;
 
         // Reuse local port to avoid triggering AniDB's multi-port ban detection
         socket_set_option($this->socket, SOL_SOCKET, SO_REUSEADDR, 1);

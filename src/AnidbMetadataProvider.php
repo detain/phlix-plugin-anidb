@@ -93,11 +93,6 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     private array $settings;
 
     /**
-     * Host PSR-11 container for resolving services.
-     */
-    private ?ContainerInterface $container = null;
-
-    /**
      * UDP transport seam — owns the raw socket lifecycle.
      *
      * Injected (defaulting to {@see SocketUdpClient}) so AUTH / command-parse /
@@ -279,7 +274,10 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      */
     public function onEnable(ContainerInterface $container): void
     {
-        $this->container = $container;
+        // The container is used transiently (registration below) — it is
+        // deliberately NOT stored: nothing in this class reads a retained
+        // container, and a dead write is what phpstan's property.onlyWritten
+        // reports (review M-ANIDB-20).
 
         // Construct the title-dump manager seam WITHOUT touching the network or
         // disk. The download + index load are deferred to ensureConnected().
@@ -618,7 +616,6 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     public function onDisable(): void
     {
         $this->udpSession->close();
-        $this->container = null;
     }
 
     /**
@@ -877,11 +874,22 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      */
     private function mapToMetadataReturn(array $anime): array
     {
+        // Boundary parse (review M-ANIDB-20): the parser produces these fields
+        // as strings / list<string>, but the array crosses into this method as
+        // array<string,mixed> and the server may hand back any stale shape.
+        // Coerce at the seam instead of feeding mixed into array_merge.
+        $romaji = isset($anime['romaji']) && is_string($anime['romaji']) ? $anime['romaji'] : '';
+        $english = isset($anime['english']) && is_string($anime['english']) ? $anime['english'] : '';
+        $kanji = isset($anime['kanji']) && is_string($anime['kanji']) ? $anime['kanji'] : '';
+        $synonyms = isset($anime['synonyms']) && is_array($anime['synonyms'])
+            ? array_values(array_filter($anime['synonyms'], 'is_string'))
+            : [];
+
         $allTitles = array_filter(array_merge(
-            [$anime['romaji']],
-            $anime['english'] !== '' ? [$anime['english']] : [],
-            $anime['kanji'] !== '' ? [$anime['kanji']] : [],
-            $anime['synonyms']
+            [$romaji],
+            $english !== '' ? [$english] : [],
+            $kanji !== '' ? [$kanji] : [],
+            $synonyms
         ));
 
         $posterUrl = null;
@@ -897,8 +905,8 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         $type = is_string($anime['type']) ? $this->mapType($anime['type']) : null;
 
         return [
-            'title'         => $anime['romaji'],
-            'original_name' => $anime['english'] ?: ($anime['kanji'] ?: null),
+            'title'         => $romaji,
+            'original_name' => $english !== '' ? $english : ($kanji !== '' ? $kanji : null),
             'overview'     => $anime['description'] ?? null,
             'year'         => $anime['year_int'] ?? null,
             'genres'       => $anime['categories'], // honest empty: amask excludes AniDB categories
@@ -917,7 +925,7 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
             'studios'      => $anime['studios'] ?? [],
             'source'       => $anime['source'] ?? null,
             'is_movie'     => $anime['is_movie'] ?? ($type === 'movie'),
-            'synonyms'     => $anime['synonyms'] ?? [],
+            'synonyms'     => $synonyms,
         ];
     }
 
@@ -926,13 +934,14 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      *
      * The dates alone decide: the fetched ANIME response carries no usable
      * dateflags and AnimeResponseParser never emits them (it parses only
-     * air_date/end_date into start_date/end_date).
+     * air_date/end_date into start_date/end_date). Every arm returns a
+     * status — there is no null outcome.
      *
      * @param array<string, mixed> $anime Parsed anime fields.
      *
-     * @return string|null Status string or null.
+     * @return string One of 'Upcoming', 'Currently Airing', 'Finished'.
      */
-    private function mapAnimeStatus(array $anime): ?string
+    private function mapAnimeStatus(array $anime): string
     {
         $startDate = $anime['start_date'] ?? 0;
         $endDate = $anime['end_date'] ?? 0;

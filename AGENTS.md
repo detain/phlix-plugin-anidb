@@ -5,10 +5,10 @@ AniDB metadata-provider plugin for [Phlix](https://github.com/detain/phlix). Res
 ## Commands
 
 ```bash
-composer install               # install deps (phpunit ^10, phpstan ^2.2, detain/phlix-shared ^0.21.0)
+composer install               # install deps (phpunit ^10, phpstan ^2.2, detain/phlix-shared ^0.52.0)
 vendor/bin/phpunit             # run the Unit suite (config in phpunit.xml)
 vendor/bin/phpunit --testdox   # verbose output
-vendor/bin/phpstan analyse --no-progress   # static analysis, level 9 (phpstan.neon)
+vendor/bin/phpstan analyse --no-progress   # static analysis, level 9 over ALL of src/ — zero ignoreErrors, zero excludes (phpstan.neon)
 php scripts/security-audit-check.php       # security gate: composer audit over the whole lock
 ```
 CI mirrors this via `.github/workflows/test.yml` (`phpunit` job on PHP 8.3 + 8.4, a `phpstan` job, and a blocking `composer-audit` job on push and pull_request).
@@ -16,7 +16,7 @@ CI mirrors this via `.github/workflows/test.yml` (`phpunit` job on PHP 8.3 + 8.4
 ## Architecture
 
 - **Entry**: `src/AnidbMetadataProvider.php` — FQCN `Phlix\Anidb\AnidbMetadataProvider`, set as `entry` in `plugin.json`.
-- **Contract**: implements `LifecycleInterface` + `MetadataSourceInterface` (`detain/phlix-shared` ^0.21); `subscribedEvents()` → `[]`, plus `lookup(string $filePath): array`.
+- **Contract**: implements `LifecycleInterface` + `MetadataSourceInterface` (`detain/phlix-shared` ^0.52); `subscribedEvents()` → `[]`, plus `lookup(string $filePath): array`.
 - **Host adapter**: `src/AnidbMetadataProviderAdapter.php` implements the server-side `Phlix\Media\Metadata\MetadataProviderInterface` (`search()`/`getDetails()`/`getImages()`), registered with the host MetadataManager from `onEnable()`.
 - **Seams** (constructor-injected, all default-constructed): `src/Udp/UdpClient.php` over `src/Udp/UdpClientInterface.php` (`src/Udp/SocketUdpClient.php`), `src/Udp/WaiterInterface.php` (`src/Udp/ProductionWaiter.php`), `src/AnimeResponseParser.php`, `src/Parser/FilenameTitleExtractor.php`, `src/Parser/EpisodeExtractor.php`, `src/TitleDump/TitleDumpManager.php`. (`src/Dto/AnimeDto.php` is a plain DTO mirroring the parsed response minus `is_movie`; it is not constructor-injected and the production mapping does not build one today — see its class docblock.)
 - **Flow**: `lookup()` → `FilenameTitleExtractor::extract()` → `ensureConnected()` (lazy, never at boot) → `EpisodeExtractor::extract()` → `TitleDumpManager::search()` → fallback `ANIME aname=` UDP → `AnimeResponseParser::parseAnimeResponse()` → `mapToMetadataReturn()`/`mapAnimeStatus()`.

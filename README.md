@@ -39,6 +39,19 @@ The plugin is unsigned by design. Install via the Phlix admin UI:
    - **API Password**: your AniDB API password (from your AniDB profile, NOT your login password)
 6. Enable the plugin.
 
+## Requirements
+
+- **PHP** >= 8.3 with `ext-sockets` (AniDB UDP transport), `ext-zlib`
+  (title-dump gzip handling) and `ext-mbstring` (title normalization) — all
+  three are declared in `composer.json`, so the host's `composer install`
+  refuses to install onto a runtime that lacks them.
+- **Workerman** is provided by the Phlix server runtime and is deliberately
+  *not* a composer dependency of this plugin. The deferred title-dump
+  download uses `Workerman\Http\Client` / `Workerman\Timer` when present
+  (`class_exists`-guarded); outside a Workerman runtime (plain CLI, unit
+  tests) the download is skipped rather than blocking, and the UDP path
+  serves. See "AniDB Protocol Notes".
+
 ## Configuration
 
 Configure these in the Phlix admin **Plugins → Configure** dialog.
@@ -148,7 +161,7 @@ This plugin is based on [`phlix-plugin-example`](https://github.com/detain/phlix
 composer install
 vendor/bin/phpunit
 vendor/bin/phpunit --testdox              # verbose output
-vendor/bin/phpstan analyse --no-progress  # static analysis, level 9 (phpstan.neon)
+vendor/bin/phpstan analyse --no-progress  # static analysis, level 9 over ALL of src/ — zero ignoreErrors, zero excludes (phpstan.neon)
 php scripts/security-audit-check.php      # security audit over the whole lock (require + require-dev)
 ```
 

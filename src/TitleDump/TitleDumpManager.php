@@ -35,6 +35,19 @@ final class TitleDumpManager
     private ?array $titleIndex = null;
 
     /**
+     * Lowercase title → AID map backing O(1) exact-match lookups.
+     *
+     * Built once from the loaded index on the first search() (review
+     * anidb__srphp item 5: the exact match, i.e. the common case after the
+     * filename extract, must not pay a full scan). First entry wins on title
+     * collisions — the same AID the pre-map scan returned first. Invalidated
+     * by {@see injectIndex()}; see {@see search()} for the build point.
+     *
+     * @var array<string, int>|null
+     */
+    private ?array $exactIndex = null;
+
+    /**
      * Path to the cache directory.
      */
     private string $cacheDir;
@@ -60,8 +73,13 @@ final class TitleDumpManager
      * The index is grouped by AID. Each entry contains:
      *   ["aid" => 12345, "titles" => [["title" => "...", "type" => "main", "lang" => "en"], ...]]
      *
-     * Search prioritizes exact matches, then prefix matches (longest first),
-     * then contains matches (longest first).
+     * Ranking (not fuzzy matching): an exact, case-insensitive title hit
+     * returns immediately, served from the lowercase-title map built once per
+     * loaded index ({@see buildExactIndex()}) — O(1) for the common case.
+     * Near misses come from the full scan: prefix matches score
+     * 800 - |len(query) - len(title)| and contains matches score
+     * 600 - |len(query) - len(title)|, so titles CLOSEST IN LENGTH to the
+     * query win within their tier, and prefix always outranks contains.
      *
      * @param string $query Title to search for.
      *
@@ -76,6 +94,16 @@ final class TitleDumpManager
         }
 
         $queryLower = mb_strtolower($query);
+
+        // Exact match: O(1) from the per-load map (owns every exact hit now —
+        // the scan below deliberately no longer re-checks equality).
+        if ($this->exactIndex === null) {
+            $this->exactIndex = $this->buildExactIndex($this->titleIndex);
+        }
+        if (isset($this->exactIndex[$queryLower])) {
+            return $this->exactIndex[$queryLower];
+        }
+
         $queryLen = mb_strlen($query);
         $bestAID = null;
         $bestScore = 0;
@@ -87,11 +115,6 @@ final class TitleDumpManager
             foreach ($titles as $titleEntry) {
                 $titleLower = $titleEntry['lower_title'] ?? mb_strtolower($titleEntry['title']);
                 $titleLen = mb_strlen($titleEntry['title']);
-
-                // Exact match: return immediately
-                if ($titleLower === $queryLower) {
-                    return $aid;
-                }
 
                 // Prefix match: score = 800 - abs(len(query) - len(title))
                 // Prefer titles closer in length to the query
@@ -116,6 +139,34 @@ final class TitleDumpManager
         }
 
         return $bestAID;
+    }
+
+    /**
+     * Build the lowercase-title → AID map backing O(1) exact-match lookups.
+     *
+     * First entry wins: a title can repeat across AIDs in the dump, and the
+     * pre-map scan returned the first indexed exact match, so insertion order
+     * is preserved deliberately. Called lazily from {@see search()} once per
+     * loaded index; {@see injectIndex()} resets the memo.
+     *
+     * @param list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}> $index
+     *
+     * @return array<string, int>
+     */
+    private function buildExactIndex(array $index): array
+    {
+        $map = [];
+
+        foreach ($index as $entry) {
+            foreach ($entry['titles'] as $titleEntry) {
+                $lower = mb_strtolower($titleEntry['title']);
+                if (!isset($map[$lower])) {
+                    $map[$lower] = $entry['aid'];
+                }
+            }
+        }
+
+        return $map;
     }
 
     /**
@@ -166,6 +217,14 @@ final class TitleDumpManager
      *   - type (string)
      *   - lang (string)
      *
+     * Drop policy (review anidb__srphp item 6): an entry is all-or-nothing —
+     * ONE malformed title (non-array element, or a missing/non-string
+     * title|type|lang field) rejects the WHOLE AID entry via `continue 2`.
+     * Deliberate: a partially-trusted alias set could mask upstream dump
+     * corruption that also affects the surviving titles, so losing one
+     * anime's aliases beats searching against suspect data. Pinned by
+     * TitleIndexSchemaValidationTest (each drop arm has its own test).
+     *
      * @param array<mixed> $entries
      *
      * @return list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}>
@@ -195,6 +254,8 @@ final class TitleDumpManager
 
             foreach ($entry['titles'] as $title) {
                 if (!is_array($title)) {
+                    // Drop-policy arm: one scalar where an object belongs
+                    // condemns the whole entry (see docblock above).
                     continue 2;
                 }
 
@@ -204,6 +265,7 @@ final class TitleDumpManager
                     || !is_string($title['type'])
                     || !is_string($title['lang'])
                 ) {
+                    // Drop-policy arm: malformed title condemns the whole entry.
                     continue 2;
                 }
 
@@ -273,5 +335,8 @@ final class TitleDumpManager
     public function injectIndex(array $index): void
     {
         $this->titleIndex = $index;
+        // The exact-match memo is derived state: a fresh index must rebuild it
+        // on the next search() (otherwise stale titles would keep resolving).
+        $this->exactIndex = null;
     }
 }

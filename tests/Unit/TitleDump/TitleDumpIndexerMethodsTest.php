@@ -179,11 +179,18 @@ final class TitleDumpIndexerMethodsTest extends TestCase
         $this->assertSame('test-data', $result);
     }
 
-    public function test_fetch_calls_callback_with_null_when_http_client_is_null(): void
+    /**
+     * The seam can never be null (review anidb__srphp item 9 cure): passing
+     * null at construction coalesces to the default transport, which — with
+     * Workerman\Http\Client absent from this test runtime — reports failure
+     * as `null` to the callback. Same observable contract as before the dead
+     * "httpClient === null" branch was removed; the name now tells the truth.
+     */
+    public function test_fetch_without_injection_yields_null_via_default_transport_without_workerman(): void
     {
         $dir = $this->makeTmpDir();
 
-        // Create indexer with null httpClient
+        // No injection → constructor sets defaultHttpClient(...) as the callable.
         $indexer = new TitleDumpIndexer($dir, 'http://example.com/test.gz', null);
 
         $reflection = new \ReflectionClass($indexer);
@@ -234,6 +241,55 @@ final class TitleDumpIndexerMethodsTest extends TestCase
             $this->assertFalse($result);
         } finally {
             chmod($dir, 0755);
+        }
+    }
+
+    /**
+     * Race-safe mkdir cure (review anidb__srphp item 9, writeIndex arm): when
+     * the directory can neither be found nor created, writeIndex must fail
+     * EARLY — it never reaches the doomed file write. The unguarded `mkdir`
+     * fell through to file_put_contents, so the collected diagnostics prove
+     * which code path ran regardless of @-suppression delivery semantics.
+     */
+    public function test_write_index_fails_early_without_attempting_the_file_write(): void
+    {
+        $root = $this->makeTmpDir();
+        $blocked = $root . '/locked';
+        mkdir($blocked, 0755, true);
+        chmod($blocked, 0555); // uncreatable child for this user
+
+        try {
+            $indexer = new TitleDumpIndexer($blocked . '/nested', 'http://example.com/test.gz');
+
+            $reflection = new \ReflectionClass($indexer);
+            $method = $reflection->getMethod('writeIndex');
+            $method->setAccessible(true);
+
+            $diagnostics = [];
+            set_error_handler(static function (int $severity, string $message) use (&$diagnostics): bool {
+                $diagnostics[] = $message;
+
+                return true;
+            });
+
+            try {
+                $result = $method->invoke($indexer, [['aid' => 1, 'titles' => []]]);
+            } finally {
+                restore_error_handler();
+            }
+
+            $this->assertFalse($result);
+            foreach ($diagnostics as $diagnostic) {
+                $this->assertStringNotContainsString(
+                    'file_put_contents',
+                    $diagnostic,
+                    'writeIndex must return false before attempting the file write (unguarded-mkdir regression)'
+                );
+            }
+            $this->assertLessThan(2, count($diagnostics), 'at most the @-suppressed mkdir diagnostic may be recorded');
+            $this->assertFileDoesNotExist($blocked . '/nested/title_index.json');
+        } finally {
+            chmod($blocked, 0755);
         }
     }
 

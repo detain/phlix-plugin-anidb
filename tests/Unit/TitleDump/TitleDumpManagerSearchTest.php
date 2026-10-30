@@ -194,6 +194,67 @@ final class TitleDumpManagerSearchTest extends TestCase
         $this->assertSame(1, $manager->search('Fate/stay night'));
     }
 
+    /**
+     * Exact hits are owned by the lowercase-title map (review anidb__srphp
+     * item 5 cure): an exact entry indexed LAST must still resolve to its
+     * own AID even when earlier entries offer same-tier prefix matches.
+     */
+    public function test_exact_match_resolves_from_map_regardless_of_scan_position(): void
+    {
+        $manager = $this->createManagerWithIndex([
+            ['aid' => 1, 'titles' => [['title' => 'Bleach Ten', 'type' => 'main', 'lang' => 'en']]],
+            ['aid' => 2, 'titles' => [['title' => 'Bleach Nine', 'type' => 'main', 'lang' => 'en']]],
+            ['aid' => 3, 'titles' => [['title' => 'bleach', 'type' => 'syn', 'lang' => 'en']]],
+        ]);
+
+        // Map lookup returns the exact AID 3 — not a prefix-score winner.
+        $this->assertSame(3, $manager->search('Bleach'));
+    }
+
+    /**
+     * The exact memo is derived state: injectIndex() must reset it, or titles
+     * from a replaced index would keep resolving from the stale map.
+     */
+    public function test_inject_index_resets_the_exact_match_memo(): void
+    {
+        $manager = $this->createManagerWithIndex([
+            ['aid' => 7, 'titles' => [['title' => 'Stale Title', 'type' => 'main', 'lang' => 'en']]],
+        ]);
+
+        $this->assertSame(7, $manager->search('Stale Title'));
+
+        $manager->injectIndex([
+            ['aid' => 8, 'titles' => [['title' => 'Fresh Title', 'type' => 'main', 'lang' => 'en']]],
+        ]);
+
+        // Old exact title must no longer resolve…
+        $this->assertNull($manager->search('Stale Title'));
+        // …and the new index must own exact lookups.
+        $this->assertSame(8, $manager->search('Fresh Title'));
+    }
+
+    /**
+     * The map builder lowercases keys and keeps first-entry-wins on title
+     * collisions (the AID the pre-map scan returned first).
+     */
+    public function test_build_exact_index_lowercases_and_keeps_first_aid_on_collision(): void
+    {
+        $manager = new TitleDumpManager($this->tempDir, 'http://example.com/test.gz');
+
+        $method = new \ReflectionMethod($manager, 'buildExactIndex');
+        $method->setAccessible(true);
+
+        $map = $method->invoke($manager, [
+            ['aid' => 10, 'titles' => [['title' => 'KaRei', 'type' => 'main', 'lang' => 'en']]],
+            ['aid' => 20, 'titles' => [['title' => 'karei', 'type' => 'syn', 'lang' => 'ja']]],
+            ['aid' => 30, 'titles' => [['title' => 'Solo', 'type' => 'main', 'lang' => 'en']]],
+        ]);
+
+        $this->assertArrayHasKey('karei', $map);
+        $this->assertSame(10, $map['karei']);
+        $this->assertSame(30, $map['solo']);
+    }
+
     private function createManagerWithIndex(array $index): TitleDumpManager
     {
         $manager = new TitleDumpManager($this->tempDir, 'http://example.com/test.gz');

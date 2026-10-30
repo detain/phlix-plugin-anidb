@@ -13,7 +13,15 @@ namespace Phlix\Anidb\Dto;
 /**
  * Data Transfer Object representing parsed anime data from AniDB.
  *
- * Captures the output shape of {@see \Phlix\Anidb\AnimeResponseParser::parseAnimeResponse()}.
+ * Mirrors the output shape of {@see \Phlix\Anidb\AnimeResponseParser::parseAnimeResponse()}
+ * EXCEPT the computed `is_movie` field, which this DTO does not carry.
+ *
+ * As-shipped truth: it is NOT wired into the production mapping —
+ * {@see \Phlix\Anidb\AnidbMetadataProvider::mapToMetadataReturn()} maps the
+ * parsed array directly and never constructs a DTO, so `fromParsedArray()` is
+ * exercised only by tests/Unit/AnimeDtoTest.php. The wire-or-delete decision
+ * is tracked upstream (review anidb__srphp item 3, estate batch W-min5); this
+ * docblock records today's state, not an intended future.
  *
  * @package Phlix\Anidb\Dto
  */

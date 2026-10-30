@@ -99,7 +99,20 @@ final class SocketUdpClient implements UdpClientInterface
         // Reuse local port to avoid triggering AniDB's multi-port ban detection
         socket_set_option($this->socket, SOL_SOCKET, SO_REUSEADDR, 1);
 
-        // Bind to a fixed local port above 1024
+        // Bind to a fixed local port above 1024 (AniDB requires one stable
+        // source port; per-packet ports trip its multi-port ban detection).
+        //
+        // Why the 0.0.0.0 wildcard is acceptable (review anidb__secaudit m4,
+        // recorded there as hygiene with the compensation verified): the
+        // wildcard announces this UDP port on every interface, so on a
+        // multi-homed box external hosts can send datagrams at it — but they
+        // can never be ACCEPTED as replies. Every read captures its origin
+        // only after a successful <=1400-byte socket_recvfrom (send(), below),
+        // and UdpClient::udpSend() drops any response that fails
+        // isValidReplyOrigin() (not a resolved IP of the configured API host
+        // and port). Pinning a route-specific source address instead would
+        // require a connect-probe dance against api.anidb.net at open() time —
+        // the exposure is a listening port, never attacker-controlled input.
         if (!@socket_bind($this->socket, '0.0.0.0', $this->localPort)) {
             $err = socket_strerror(socket_last_error($this->socket));
             $this->close();

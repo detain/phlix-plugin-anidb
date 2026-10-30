@@ -883,17 +883,17 @@ final class TitleDumpIndexer
      *
      * B5: Now uses callback-based async pattern to avoid blocking the event loop.
      *
+     * The seam is unconditionally callable: the constructor coalesces an
+     * absent injection to `defaultHttpClient(...)` (a first-class callable),
+     * and that default reports failure as `$onResult(null)` itself when
+     * Workerman\Http\Client is not in the runtime — so there is no
+     * "client is null" arm to guard here.
+     *
      * @param callable(?string): void $onResult Callback invoked with raw gzipped
      *     bytes or null on failure.
      */
     private function fetch(callable $onResult): void
     {
-        if ($this->httpClient === null) {
-            $onResult(null);
-
-            return;
-        }
-
         ($this->httpClient)($this->titleDumpUrl, $onResult);
     }
 
@@ -909,7 +909,16 @@ final class TitleDumpIndexer
         $indexFile = $this->indexFilePath();
         $dir = dirname($indexFile);
         if (!is_dir($dir)) {
-            mkdir($dir, 0755, true);
+            // Race-safe create-if-absent, same deliberate `@mkdir` idiom as
+            // claimInFlightMarker(): concurrent workers can pass the is_dir()
+            // check together, and the loser's "File exists" warning would be
+            // pure log noise. If the path is STILL not a directory after the
+            // attempt, creation genuinely failed — fail loud-early instead of
+            // cascading into a doomed file_put_contents warning.
+            @mkdir($dir, 0755, true);
+            if (!is_dir($dir)) {
+                return false;
+            }
         }
 
         $json = json_encode($index, JSON_PRETTY_PRINT);

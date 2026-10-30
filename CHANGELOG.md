@@ -31,6 +31,27 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
   refactor docblocks and a duplicated section header removed in
   `src/AnidbMetadataProvider.php`, `declare(strict_types=1)` added to
   `scripts/add-copyright-headers.php`, and this CHANGELOG introduced.
+- Review-campaign minors cluster (W-min2, eight items across docmaint/srphp/
+  secaudit lenses): `mapAnimeStatus` docblock no longer claims dateflags
+  (never parsed; dates alone decide); the stale "Wave 2 must inject" TODO in
+  the `cacheDir` constructor docblock replaced by the shipped validation
+  story; `TitleDumpManager::search` ranking prose corrected to length-
+  proximity scoring and README's "fuzzy-match" claim made honest; exact
+  title lookups now O(1) from a lowercase-title map built once per loaded
+  index (first entry wins, `injectIndex()` resets the memo; behavior-
+  equivalent by construction — the pre-map scan always resolved the same
+  AID); the `validateSchema` whole-entry drop policy is now documented,
+  commented at both `continue 2` arms, and fully pinned (new non-array-
+  title arm test); `AnimeDto` class docblock, the dead import in
+  `AnidbMetadataProvider`, and the AGENTS.md seam list now state the
+  unwired as-shipped truth (disposition stays in W-min5); the wildcard UDP
+  `0.0.0.0` bind site documents the verified reply-origin compensation
+  (review anidb__secaudit m4 accepted-cure alternative); dead
+  `httpClient === null` branch removed from `fetch()` (the constructor
+  coalesces to the default transport unconditionally) and `writeIndex`
+  mkdir made race-safe `@mkdir` + re-check, failing loud-early with no
+  doomed `file_put_contents` attempt when the directory cannot exist.
+  Suite 366→371 tests, 1098→1110 assertions (exactly five new pins).
 
 ### Maintenance eras (post-0.4.1, moving main)
 - S246: whole-lock security audit gate (require + require-dev) — `0860a64`

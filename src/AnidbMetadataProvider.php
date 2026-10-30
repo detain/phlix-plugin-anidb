@@ -10,7 +10,6 @@ declare(strict_types=1);
 
 namespace Phlix\Anidb;
 
-use Phlix\Anidb\Dto\AnimeDto;
 use Phlix\Anidb\Parser\EpisodeExtractor;
 use Phlix\Anidb\Parser\FilenameTitleExtractor;
 use Phlix\Anidb\TitleDump\TitleDumpIndexer;
@@ -206,9 +205,11 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      *     MUST live OUTSIDE the plugin tree — the plugin dir is read-only under the
      *     systemd sandbox (the /var/artwork lesson). Resolution order: explicit
      *     arg → $settings['cache_dir'] → env PHLIX_ANIDB_CACHE_DIR →
-     *     sys_get_temp_dir()/phlix-plugin-anidb. Wave 2 must inject the host's
-     *     configured writable path (e.g. /var/cache/phlix/anidb) and add it to the
-     *     systemd ReadWritePaths + install.sh.
+     *     sys_get_temp_dir()/phlix-plugin-anidb. The host operator supplies the
+     *     persistent writable path via the `cache_dir` setting (or the env
+     *     override); both are validated at construction — non-string or
+     *     non-absolute values are refused loudly (see resolveCacheDir), so the
+     *     temp-dir tail is a last resort, not the shipped story.
      */
     public function __construct(
         array $settings,
@@ -921,7 +922,11 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     }
 
     /**
-     * Map AniDB dateflags + start/end dates to a status string.
+     * Map AniDB start/end dates to a status string.
+     *
+     * The dates alone decide: the fetched ANIME response carries no usable
+     * dateflags and AnimeResponseParser never emits them (it parses only
+     * air_date/end_date into start_date/end_date).
      *
      * @param array<string, mixed> $anime Parsed anime fields.
      *

@@ -14,7 +14,7 @@ This plugin fetches structured anime metadata from [AniDB](https://anidb.net/) u
 
 ## Features
 
-- **Title dump search** — fast fuzzy-match search against all AniDB anime titles
+- **Title dump search** — offline exact/prefix/contains match search across all AniDB anime titles (exact hits resolve in O(1) from a lowercase-title index built once per load; near-misses are ranked by length similarity — not fuzzy matching)
 - **Full metadata** — romaji/english/kanji titles, synonyms, year, type, rating (the `genres` key is always empty — AniDB category tags are not in the fetched response, see Protocol Notes)
 - **Description** — fetch long descriptions via separate ANIMEDESC command
 - **Flood protection** — 4-second rate limiting between API calls (per AniDB rules)

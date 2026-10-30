@@ -303,4 +303,29 @@ final class TitleIndexSchemaValidationTest extends TestCase
         // Should fall back to empty index
         $this->assertNull($manager->search('x'));
     }
+
+    /**
+     * Drop-policy arm (review anidb__srphp item 6): a NON-ARRAY element in
+     * the titles list condemns the whole AID entry — the valid sibling title
+     * must not survive in the index.
+     */
+    public function test_non_array_title_element_drops_whole_entry(): void
+    {
+        $indexFile = $this->tempDir . '/title_index.json';
+        $data = [
+            [
+                'aid' => 12345,
+                'titles' => [
+                    'just-a-string-not-an-array',
+                    ['title' => 'Good Title', 'type' => 'main', 'lang' => 'en'],
+                ],
+            ],
+        ];
+        file_put_contents($indexFile, json_encode($data));
+
+        $manager = $this->createManager($this->tempDir);
+        $manager->ensureLoaded();
+
+        $this->assertNull($manager->search('Good Title'));
+    }
 }

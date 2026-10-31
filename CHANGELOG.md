@@ -17,6 +17,14 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- `docs/HOST_INTEGRATION.md` "Outstanding server-side work" is rewritten to the
+  LANDED server truth (M-ANIDB-04, review anidb__docmaint M4): `PluginLoader`
+  registers `MetadataSourceInterface` instances into `SourceRegistry`, the
+  movie/series resolvers consult plugin sources (`includePluginSources`),
+  `PluginMetadataEnricher`/`BackgroundEnrichmentSubscriber` gap-fill queued items
+  (omdb / anidb / myanimelist) off the scan path, and the `Application.php`
+  throwaway `MetadataManager` is gone. Stale cross-repo line coordinates were
+  replaced with file+symbol anchors.
 - `docs/HOST_INTEGRATION.md` no longer claims registration carries `['anime','series']`
   (M-ANIDB-03, review anidb__docmaint M3): the media-type ghost is replaced with the
   registered truth — `supportedMediaTypes()` returns `['series', 'movie']`, and "anime"

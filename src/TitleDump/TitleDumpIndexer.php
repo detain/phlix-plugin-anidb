@@ -1001,6 +1001,17 @@ final class TitleDumpIndexer
 
         $index = $this->parse($decoded);
 
+        if ($index === []) {
+            // Review anidb__srphp M2: an empty parse is NOT a successful index.
+            // Persisting `[]` used to report success, release the in-flight
+            // marker, and — fresh mtime and all — leave offline title lookup
+            // dead for a full MAX_AGE_SECONDS. Fail the attempt instead; the
+            // held marker's TTL stands as the retry floor.
+            error_log('TitleDumpIndexer: REFUSING response — parsed zero valid entries from the decompressed body (empty or unrecognized dump)');
+
+            return false;
+        }
+
         return $this->writeIndex($index);
     }
 
@@ -1129,7 +1140,18 @@ final class TitleDumpIndexer
             }
         }
 
-        $json = json_encode($index, JSON_PRETTY_PRINT);
+        try {
+            $json = json_encode($index, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
+        } catch (\JsonException $exception) {
+            // Review anidb__srphp M2: the unthrown form returned false here, and
+            // file_put_contents(mixed) then wrote a 0-byte file whose return of 0
+            // read back as `0 !== false` → SUCCESS. An index we cannot encode is
+            // a failed attempt, loudly — never a persisted empty success.
+            error_log('TitleDumpIndexer: REFUSING write — title index could not be JSON-encoded: ' . $exception->getMessage());
+
+            return false;
+        }
+
         $result = file_put_contents($indexFile, $json);
 
         return $result !== false;

@@ -17,6 +17,16 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- Title dump: an EMPTY parse result is a failed attempt, not a success
+  (M-ANIDB-12, review anidb__srphp M2): `parse()` yielding zero entries was
+  written as `[]`, reported `true`, released the in-flight marker, and the
+  fresh mtime then pinned an empty offline index for a full 24 h — the
+  "2-byte title_index.json" symptom. A non-encodable index (invalid UTF-8
+  from a corrupt mirror) likewise slipped through `json_encode` returning
+  false because `file_put_contents(mixed)` wrote an empty file whose `0`
+  read back as success. Both paths now fail loud, persist nothing, and keep
+  the marker held as the retry floor.
+
 - 230 ANIME `synonyms` now reads its OWN column (M-ANIDB-11, review
   anidb__srphp M1): the parser mapped amask field 10 (`short_names`) into
   `synonyms` and never read field 11 — short names persisted as synonyms and

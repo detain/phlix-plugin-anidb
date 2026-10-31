@@ -540,6 +540,98 @@ DAT;
      * Point error_log at a scratch file; the returned closure restores the
      * previous setting (this PHP build has no restore_error_log()).
      */
+    /**
+     * Review anidb__srphp M2, failure shape (a): a body that decodes to zero
+     * valid entries used to be written as `[]`, reported SUCCESS, released the
+     * in-flight marker, and left the offline index dead for a full
+     * MAX_AGE_SECONDS. It must now be a failed attempt: nothing written,
+     * marker held (its TTL is the retry floor), loud in the log.
+     */
+    public function test_downloadAndIndex_refuses_body_that_yields_zero_valid_entries(): void
+    {
+        $tmpDir = sys_get_temp_dir() . '/title_dump_test_' . uniqid();
+        mkdir($tmpDir, 0755, true);
+
+        $gzData = gzencode("# only comments\n# and more comments\n", 6);
+        $this->assertNotFalse($gzData);
+
+        $logFile = $tmpDir . '/stderr.log';
+        $restoreLog = $this->sinkErrorLog($logFile);
+
+        try {
+            $httpClient = static function (string $url, callable $onResult) use ($gzData): void {
+                $onResult($gzData);
+            };
+            $indexer = new TitleDumpIndexer($tmpDir, 'https://example.test/anime-titles.dat.gz', $httpClient);
+
+            $this->assertFalse(
+                $indexer->downloadAndIndex(),
+                'an empty parse result must be treated as a failed download attempt'
+            );
+
+            $this->assertFileDoesNotExist(
+                $tmpDir . '/title_index.json',
+                'a failed attempt must not persist an empty success record'
+            );
+
+            // Deliberate: the marker stays so IN_FLIGHT_TTL_SECONDS throttles retries.
+            $this->assertFileExists($tmpDir . '/title_index.download.lock');
+
+            $logged = file_get_contents($logFile);
+            $this->assertIsString($logged);
+            $this->assertStringContainsString('zero valid entries', $logged);
+        } finally {
+            $restoreLog();
+            $this->recursiveDelete($tmpDir);
+        }
+    }
+
+    /**
+     * Review anidb__srphp M2, failure shape (b): json_encode() returning false
+     * (invalid UTF-8 from a corrupt mirror) used to flow into
+     * file_put_contents(mixed), which wrote a 0-byte file and returned 0 —
+     * `0 !== false` read back as SUCCESS. An unencodable index must fail loud.
+     */
+    public function test_writeIndex_fails_loud_when_index_cannot_be_encoded(): void
+    {
+        $tmpDir = sys_get_temp_dir() . '/title_dump_test_' . uniqid();
+        mkdir($tmpDir, 0755, true);
+
+        $logFile = $tmpDir . '/stderr.log';
+        $restoreLog = $this->sinkErrorLog($logFile);
+
+        try {
+            $indexer = new TitleDumpIndexer($tmpDir, 'https://example.test/anime-titles.dat.gz', static function (): void {
+            });
+
+            $corrupt = [[
+                'aid'    => 1,
+                'titles' => [[
+                    'title' => "\xFF\xFE not valid UTF-8",
+                    'type'  => 'main',
+                    'lang'  => 'en',
+                ]],
+            ]];
+
+            $method = new \ReflectionMethod(TitleDumpIndexer::class, 'writeIndex');
+            $method->setAccessible(true);
+
+            $this->assertFalse($method->invoke($indexer, $corrupt));
+
+            $this->assertFileDoesNotExist(
+                $tmpDir . '/title_index.json',
+                'an unencodable index must never reach the filesystem'
+            );
+
+            $logged = file_get_contents($logFile);
+            $this->assertIsString($logged);
+            $this->assertStringContainsString('could not be JSON-encoded', $logged);
+        } finally {
+            $restoreLog();
+            $this->recursiveDelete($tmpDir);
+        }
+    }
+
     private function sinkErrorLog(string $file): \Closure
     {
         $previous = ini_get('error_log');

@@ -243,6 +243,130 @@ final class SocketUdpClientTest extends TestCase
         $this->assertNull($client->boundPort());
     }
 
+    // -----------------------------------------------------------------
+    // Framing-frame tolerance (review anidb__srphp M3) — real loopback
+    // sockets, all frames pre-queued so the test never needs concurrency.
+    // -----------------------------------------------------------------
+
+    /**
+     * @requires extension sockets
+     */
+    public function test_send_returns_the_first_result_frame_not_a_leading_001_ack(): void
+    {
+        [$server, $client] = $this->loopbackPair(19501, 19401);
+
+        try {
+            // The documented multi-frame shape: a 001 command-accepted ACK
+            // precedes the 2xx result. The old single-read transport returned
+            // the ACK and UdpClient's /^(200|201)\s/ AUTH regex failed on it.
+            $this->queueFromServer($server, $client, ["001 AUTH 1 200\n", "200 K9SESSIONKEY LOGIN ACCEPTED"]);
+
+            $reply = $client->send('AUTH user=u&pass=p&protover=3&client=phlix&clientver=1');
+
+            $this->assertSame('200 K9SESSIONKEY LOGIN ACCEPTED', $reply);
+            $this->assertSame('127.0.0.1', $client->lastReplyHost());
+        } finally {
+            $this->closePair($server, $client);
+        }
+    }
+
+    /**
+     * @requires extension sockets
+     */
+    public function test_send_skips_stale_framing_frames_left_by_the_previous_command(): void
+    {
+        [$server, $client] = $this->loopbackPair(19502, 19411);
+
+        try {
+            // Desync-poison shape: a trailing 005 RELEASE from the PREVIOUS
+            // exchange is still sitting in the buffer when the next command's
+            // reply arrives. The old transport read it as this command's
+            // response — the reply-stream poison the review flagged.
+            $this->queueFromServer($server, $client, ["005 RELEASE s=1234", "240 PONG"]);
+
+            $reply = $client->send('PING s=K9SESSIONKEY');
+
+            $this->assertSame('240 PONG', $reply);
+        } finally {
+            $this->closePair($server, $client);
+        }
+    }
+
+    /**
+     * @requires extension sockets
+     */
+    public function test_send_single_packet_result_is_returned_verbatim_as_before(): void {
+        [$server, $client] = $this->loopbackPair(19503, 19421);
+
+        try {
+            $this->queueFromServer($server, $client, ['230 ANIME\n1|0|2020|TV Series']);
+
+            $reply = $client->send('ANIME aid=1&amask=00f0f0f0000000');
+
+            $this->assertSame('230 ANIME\n1|0|2020|TV Series', $reply);
+        } finally {
+            $this->closePair($server, $client);
+        }
+    }
+
+    public function test_is_framing_frame_classifies_protocol_overhead_only(): void
+    {
+        // Framing/overhead: 001 ACK, 002 continuation fragment, 005 RELEASE.
+        $this->assertTrue(SocketUdpClient::isFramingFrame('001 AUTH 1 200'));
+        $this->assertTrue(SocketUdpClient::isFramingFrame("002 4 continuation data\nrest"));
+        $this->assertTrue(SocketUdpClient::isFramingFrame('005 RELEASE s=9'));
+        // Every AniDB result code family must classify as a RESULT — including
+        // lookalike numeric lines, which must NOT be skipped.
+        $this->assertFalse(SocketUdpClient::isFramingFrame('200 K9 LOGIN ACCEPTED'));
+        $this->assertFalse(SocketUdpClient::isFramingFrame('230 ANIME\n1|0'));
+        $this->assertFalse(SocketUdpClient::isFramingFrame('240 PONG'));
+        $this->assertFalse(SocketUdpClient::isFramingFrame('250 2 123 456'));
+        $this->assertFalse(SocketUdpClient::isFramingFrame('506 SESSION EXPIRED'));
+        $this->assertFalse(SocketUdpClient::isFramingFrame('0011 NOT-A-REAL-FRAME'));
+        $this->assertFalse(SocketUdpClient::isFramingFrame('001NO-SPACE-RESULT'));
+    }
+
+    /**
+     * Build a fake AniDB server socket + a client transport bound nearby on
+     * loopback. Ports are fixed (matching the established precedent of this
+     * file) and far from the 9000/9001 production pair.
+     *
+     * @return array{0: \Socket, 1: SocketUdpClient}
+     */
+    private function loopbackPair(int $serverPort, int $clientLocalPort): array
+    {
+        $server = @socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
+        $this->assertNotFalse($server, 'socket_create for fake server failed');
+        $this->assertTrue(@socket_bind($server, '127.0.0.1', $serverPort), "server bind {$serverPort} failed");
+
+        $client = new SocketUdpClient('127.0.0.1', $serverPort, $clientLocalPort);
+        $client->open();
+
+        return [$server, $client];
+    }
+
+    /**
+     * Deliver pre-canned datagrams to the client's bound port without waiting
+     * for its command (loopback is instantaneous; the client's own sendto is
+     * what its reply-origin check then sees — this staging only pre-fills the
+     * receive buffer, exactly the state a live stale/ACK sequence produces).
+     */
+    private function queueFromServer(\Socket $server, SocketUdpClient $client, array $frames): void
+    {
+        $boundPort = $client->boundPort();
+        $this->assertNotNull($boundPort);
+        foreach ($frames as $frame) {
+            $sent = @socket_sendto($server, $frame, strlen($frame), 0, '127.0.0.1', $boundPort);
+            $this->assertNotFalse($sent, 'queueing a frame to the client failed');
+        }
+    }
+
+    private function closePair(\Socket $server, SocketUdpClient $client): void
+    {
+        $client->close();
+        @socket_close($server);
+    }
+
     /**
      * @requires extension sockets
      */

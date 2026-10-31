@@ -17,6 +17,16 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- UDP transport now tolerates AniDB's framing frames (M-ANIDB-13, review
+  anidb__srphp M3): `send()` read exactly one datagram per command, so a
+  leading 001 ACK became the AUTH "reply" (regex fail) and a trailing
+  005 RELEASE poisoned the NEXT command's response. The read loop now skips
+  001/002/005 frames inside ONE shared 10 s budget and returns the first
+  result-code frame; single-packet behavior is byte-identical. Multi-packet
+  002 payload reassembly stays a disclosed residual (needs a credentialed
+  live capture — the reviewer's own uncertainty gate); a split reply now
+  fails as a bounded timeout instead of a half-read string.
+
 - Title dump: an EMPTY parse result is a failed attempt, not a success
   (M-ANIDB-12, review anidb__srphp M2): `parse()` yielding zero entries was
   written as `[]`, reported `true`, released the in-flight marker, and the

@@ -26,9 +26,12 @@ use Socket;
  *   worker is occupied for up to 10 s when no reply arrives (select parks the
  *   process just as long as a blocking recvfrom with SO_RCVTIMEO would; the
  *   difference is the mechanism, not the occupation);
- * - {@see send()} sendto's the datagram then uses `socket_select()` to wait
- *   for data availability before reading up to 1400 bytes, returning the trimmed
- *   payload (or null on timeout);
+ * - {@see send()} sendto's the datagram then waits on `socket_select()` within
+ *   ONE shared 10 s budget, skipping protocol framing frames (001 ACK / 002
+ *   fragment / 005 RELEASE) and returning the first result-code payload (or
+ *   null on timeout). Multi-packet 002 payload REASSEMBLY is not implemented —
+ *   a fragment-split result ends as a bounded timeout failure, never a
+ *   half-read reply (disclosed residual, see send());
  * - {@see close()} closes the socket if open and clears the bound port.
  *
  * The reply's source host/port are captured by {@see send()} for the caller —
@@ -50,6 +53,20 @@ final class SocketUdpClient implements UdpClientInterface
      * port instead of failing hard (review M-ANIDB-33).
      */
     private const BIND_PORT_WINDOW = 8;
+
+    /**
+     * Wall-clock budget for one send()/reply exchange, shared across every
+     * datagram the read loop consumes (review anidb__srphp M3: with framing
+     * frames to skip, the budget must bound the WHOLE exchange, not restart
+     * per datagram — an endless stale stream can never extend the wait).
+     */
+    private const RESPONSE_BUDGET_SECONDS = 10;
+
+    /**
+     * Maximum datagram size the transport reads, matching the AniDB UDP MTU
+     * contract.
+     */
+    private const MAX_DATAGRAM_BYTES = 1400;
 
     /**
      * AniDB UDP API server hostname (datagram destination).
@@ -200,41 +217,96 @@ final class SocketUdpClient implements UdpClientInterface
             return null;
         }
 
-        // socket_select() bounds the wait for data availability to 10 s — a
-        // bounded, readable wait, but still a wall-clock occupation (see header).
-        // This replaces the blocking socket_recvfrom that previously parked
-        // the worker for up to 10 seconds.
-        $read = [$this->socket];
-        $write = null;
-        $except = null;
-        $timeoutSec = 10;
+        // One shared 10 s wall-clock budget bounds the WHOLE exchange (a
+        // bounded, readable wait — still an occupation, see header prose law).
+        // The loop exists for AniDB's framing frames (review anidb__srphp M3):
+        // the documented protocol can put a 001 command-accepted ACK before
+        // the result and leave a 005 RELEASE (or a 002 continuation fragment)
+        // in the receive buffer. Those are protocol overhead, never a reply:
+        // reading exactly one datagram — as this transport used to — returned
+        // an ACK as the AUTH result and poisoned the NEXT command with the
+        // previous one's trailing frame. Skipping frames inside one bounded
+        // loop fixes both shapes without a pre-send drain: any stale framing
+        // frame is consumed by the same loop that then waits for the result.
+        $deadline = microtime(true) + self::RESPONSE_BUDGET_SECONDS;
 
-        $selected = @socket_select($read, $write, $except, $timeoutSec);
+        while (true) {
+            $remaining = $deadline - microtime(true);
+            if ($remaining <= 0) {
+                // Budget exhausted — no result frame arrived (or only overhead
+                // did). Honest null; callers already handle timeout-or-error.
+                return null;
+            }
 
-        if ($selected === false) {
-            return null;
+            $read = [$this->socket];
+            $write = null;
+            $except = null;
+
+            $selected = @socket_select(
+                $read,
+                $write,
+                $except,
+                (int) $remaining,
+                (int) (($remaining - (int) $remaining) * 1_000_000),
+            );
+
+            if ($selected === false || $selected === 0) {
+                return null;
+            }
+
+            $recvBuf = '';
+            $recvFrom = '';
+            $port = 0;
+
+            $recvResult = @socket_recvfrom($this->socket, $recvBuf, self::MAX_DATAGRAM_BYTES, 0, $recvFrom, $port);
+
+            if ($recvResult === false) {
+                return null;
+            }
+
+            $frame = trim($recvBuf);
+
+            if (self::isFramingFrame($frame)) {
+                // Protocol overhead (001 ACK / 002 fragment / 005 RELEASE):
+                // consumed so it can never be mistaken for a reply — the
+                // desync poison the review named. NOTE (disclosed residual):
+                // MULTI-PACKET RESULT REASSEMBLY across 002 fragments is NOT
+                // implemented — fragments are skipped, so a split reply ends
+                // as a bounded timeout failure rather than a half-read string.
+                // Correct reassembly needs a credentialed live capture of the
+                // fragment wire shape (the reviewer's own uncertainty gate);
+                // every response shape this plugin exercises (230/231/240/250
+                // for its amask and command set) fits one <=1400-byte packet,
+                // and single-packet behavior is byte-identical to before.
+                continue;
+            }
+
+            // Capture the reply origin; UdpClient::isValidReplyOrigin() validates it.
+            $this->lastReplyHost = $recvFrom !== '' ? $recvFrom : null;
+            $this->lastReplyPort = $port !== 0 ? $port : null;
+
+            return $frame;
         }
+    }
 
-        if ($selected === 0) {
-            // Timeout — no data available within the 10s window
-            return null;
-        }
-
-        $recvBuf = '';
-        $recvFrom = '';
-        $port = 0;
-
-        $recvResult = @socket_recvfrom($this->socket, $recvBuf, 1400, 0, $recvFrom, $port);
-
-        if ($recvResult === false) {
-            return null;
-        }
-
-        // Capture the reply origin; UdpClient::isValidReplyOrigin() validates it.
-        $this->lastReplyHost = $recvFrom !== '' ? $recvFrom : null;
-        $this->lastReplyPort = $port !== 0 ? $port : null;
-
-        return trim($recvBuf);
+    /**
+     * Is this datagram AniDB protocol framing overhead rather than a result?
+     *
+     * Per the UDP API definition the server's overhead frames are "001"
+     * (command accepted / multi-packet header), "002" (continuation fragment)
+     * and "005" (release). Every genuine reply starts with a THREE-digit
+     * result code (200-599) — never "001"/"002"/"005" — so a strict
+     * `00[125]` + whitespace match classifies overhead without ever eating a
+     * result (lookalikes like "0011" or "001NO-SPACE" are results-side data
+     * and must NOT be skipped).
+     *
+     * @param string $frame Trimmed datagram payload.
+     *
+     * @return bool True when the frame is protocol overhead.
+     */
+    public static function isFramingFrame(string $frame): bool
+    {
+        return (bool) preg_match('/^00[125]\s/', $frame);
     }
 
     /**

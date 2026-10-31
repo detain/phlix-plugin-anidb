@@ -51,14 +51,13 @@ interface UdpClientInterface
     public function open(): void;
 
     /**
-     * Send a datagram and return the trimmed response, or null on timeout/error.
+     * Send a datagram and return the trimmed result response, or null on timeout/error.
      *
      * Records the origin host/port of the reply for later retrieval via
-     * {@see lastReplyHost()} / {@see lastReplyPort()}.
-     *
-     * @param string $data Raw command string to transmit.
-     *
-     * @return string|null Trimmed response payload, or null when no reply arrived.
+     * {@see lastReplyHost()} / {@see lastReplyPort()}. A conforming transport
+     * skips protocol framing frames (AniDB 001/002/005 overhead) within a
+     * single bounded wait and returns the first result-code frame — see
+     * {@see SocketUdpClient::send()} (review anidb__srphp M3).
      *
      * @throws \RuntimeException If the socket is not open.
      */

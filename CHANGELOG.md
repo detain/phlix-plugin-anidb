@@ -17,6 +17,15 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- Title-dump fetch refuses redirects and makes cleartext loud (M-ANIDB-10,
+  review anidb__secaudit M3): `dumpRequestOptions()` pins
+  `allow_redirects.max = 0` — a 301 can no longer walk an https download down
+  to a plaintext leg the M-ANIDB-08 context cannot verify (the 3xx then fails
+  the existing gzip REFUSING arm loudly); `fetch()` logs one loud cleartext
+  warning naming the host (never credentials). Operator http:// mirrors are
+  still accepted (documented mirror support — hard-refusal left as a
+  disclosed owner call). 4 new pins, hermetic, in
+  `tests/Unit/TitleDump/TitleDumpCleartextPolicyTest.php`.
 - Title-dump download now VERIFIES TLS (M-ANIDB-08, review anidb__secaudit M1):
   `TitleDumpIndexer::httpClientConfig()` passes a strict `context.ssl`
   (verify_peer/verify_peer_name true, allow_self_signed false, explicit

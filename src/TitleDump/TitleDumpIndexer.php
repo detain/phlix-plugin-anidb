@@ -126,6 +126,38 @@ final class TitleDumpIndexer
     }
 
     /**
+     * Non-callback request options for the dump fetch.
+     *
+     * M-ANIDB-10 (review anidb__secaudit M3): the bundled client follows
+     * redirects by default (vendored `Request::$options` ships
+     * `allow_redirects.max = 5`), and `Client::parseAddress()` maps every
+     * final URL to a plaintext `tcp://` connection — so a 301 to `http://`
+     * silently downgrades the dump fetch to a leg where the strict
+     * M-ANIDB-08 ssl context protects nothing (no certificate is involved on
+     * http). Pinning `allow_redirects.max` to 0 means a 3xx arrives as the
+     * final response; it is not valid gzip, and the existing REFUSING
+     * fail-closed arm turns the redirect into a LOUD failed attempt instead
+     * of a quiet cleartext success.
+     *
+     * @return array{
+     *     method: 'GET',
+     *     headers: array<string, string>,
+     *     allow_redirects: array{max: 0}
+     * }
+     */
+    public static function dumpRequestOptions(): array
+    {
+        return [
+            'method'  => 'GET',
+            'headers' => [
+                'Accept-Encoding' => 'gzip, deflate',
+                'User-Agent'      => 'phlix-anidb-plugin/1.0',
+            ],
+            'allow_redirects' => ['max' => 0],
+        ];
+    }
+
+    /**
      * Deferral interval, in seconds, for the ONE-SHOT download timer.
      *
      * 0 = "run on the next event-loop tick", which is the entire intent of the
@@ -1053,6 +1085,23 @@ final class TitleDumpIndexer
      */
     private function fetch(callable $onResult): void
     {
+        // M-ANIDB-10: a cleartext dump download must be VISIBLE, not the
+        // silent default the docs warned away. plugin.json documents mirrors
+        // as "Must be https"; an operator still on http:// gets exactly one
+        // loud line per attempt naming the host (never the full URL —
+        // same rule as the scheme guard: settings values can embed
+        // credentials). Hard-refusal of http mirrors is deliberately NOT this
+        // lane's call: it would break the documented mirror path for
+        // operators whose mirror truly has no https (disclosed residual).
+        if (stripos($this->titleDumpUrl, 'https://') !== 0) {
+            $host = parse_url($this->titleDumpUrl, PHP_URL_HOST);
+            error_log(
+                'TitleDumpIndexer: LOUD WARNING — title dump fetch over cleartext HTTP (http://'
+                . (is_string($host) ? $host : '(unparseable host)')
+                . ') — AniDB serves the dump over https and the plugin documents https mirrors.'
+            );
+        }
+
         ($this->httpClient)($this->titleDumpUrl, $onResult);
     }
 
@@ -1134,12 +1183,7 @@ final class TitleDumpIndexer
         // overlays context.ssl, and the overlay replaces the whole ssl
         // sub-array (peer_name included). One source of truth: the config.
         $client = new Client(self::httpClientConfig($url));
-        $client->request($url, [
-            'method'  => 'GET',
-            'headers' => [
-                'Accept-Encoding' => 'gzip, deflate',
-                'User-Agent'      => 'phlix-anidb-plugin/1.0',
-            ],
+        $client->request($url, self::dumpRequestOptions() + [
             'success' => static function ($response) use (&$state): void {
                 $body = (string) $response->getBody();
                 $state['body'] = $body !== '' ? $body : null;

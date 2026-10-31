@@ -17,6 +17,15 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- Title-dump download now VERIFIES TLS (M-ANIDB-08, review anidb__secaudit M1):
+  `TitleDumpIndexer::httpClientConfig()` passes a strict `context.ssl`
+  (verify_peer/verify_peer_name true, allow_self_signed false, explicit
+  peer_name) to the Workerman client — the vendored pool's base context accepts
+  ANY certificate without it, letting an on-path attacker poison every
+  worker's title index. Optional `PHLIX_ANIDB_CA_BUNDLE` trust-root pin fails
+  loud when unusable. Guarded by 7 new pins in
+  `tests/Unit/TitleDump/TitleDumpHttpClientConfigTest.php` (config shape +
+  wiring source-scan — the S440 gate files stay zero-diff).
 - Misleading "non-blocking"/"never parked" claims removed (M-ANIDB-07, review
   anidb__docmaint M7): `SocketUdpClient`'s header/send docs now state the 10 s
   select wait is a bounded WALL-CLOCK occupation of the calling worker (the

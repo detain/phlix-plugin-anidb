@@ -56,6 +56,76 @@ final class TitleDumpIndexer
     public const MAX_DECOMPRESSED_BYTES = 67108864;
 
     /**
+     * Wall-clock budget handed to the dump HTTP client, in seconds.
+     */
+    public const HTTP_TIMEOUT_SECONDS = 60;
+
+    /**
+     * Optional env naming a CA bundle to pin the dump download's trust root.
+     *
+     * AniDB ships normal public CA-issued certs, so this exists only for the
+     * operator whose egress MITMs TLS and who deliberately wants to trust that
+     * chain — the server relay's ca_bundle posture, same fail-loud rule: a
+     * configured-but-unusable bundle is a misconfiguration, not a silent skip.
+     */
+    public const CA_BUNDLE_ENV = 'PHLIX_ANIDB_CA_BUNDLE';
+
+    /**
+     * Build the Workerman\Http\Client constructor options for the dump fetch.
+     *
+     * M-ANIDB-08 (review anidb__secaudit M1): the vendored pool creates every
+     * TLS connection from an INSECURE base — `ssl.verify_peer=false`,
+     * `verify_peer_name=false`, `allow_self_signed=true` — and overlays the
+     * caller's `'context'` option via a shallow array_merge. Without an
+     * explicit strict `context.ssl` the dump download has no certificate
+     * verification at all, so an on-path attacker at AniDB's Cloudflare front
+     * can serve a forged dump and poison every worker's title→AID index. The
+     * override REPLACES the whole ssl sub-array, so `peer_name` (which the
+     * base otherwise derives from the address) must be carried here too.
+     *
+     * @return array{timeout: int, context: array{ssl: array<string, mixed>}}
+     *
+     * @throws RuntimeException If the URL has no host, or the CA-bundle env is
+     *                          set to something that is not a readable file.
+     */
+    public static function httpClientConfig(string $url): array
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+        if (!is_string($host) || $host === '') {
+            // Deliberately echoes the URL: by contract it carries no
+            // credentials (scheme-guarded http(s) download URL), and a
+            // hostless fetch failing loudly is strictly better than a
+            // peer-name-less verification pass.
+            throw new RuntimeException(
+                'TitleDumpIndexer: title dump URL has no host to verify: ' . $url
+            );
+        }
+
+        /** @var array<string, mixed> $ssl */
+        $ssl = [
+            'verify_peer'       => true,
+            'verify_peer_name'  => true,
+            'allow_self_signed' => false,
+            'peer_name'         => $host,
+        ];
+
+        $caBundle = getenv(self::CA_BUNDLE_ENV);
+        if (is_string($caBundle) && $caBundle !== '') {
+            if (!is_file($caBundle) || !is_readable($caBundle)) {
+                throw new RuntimeException(
+                    'TitleDumpIndexer: ' . self::CA_BUNDLE_ENV . ' is set but does not name a readable file: ' . $caBundle
+                );
+            }
+            $ssl['cafile'] = $caBundle;
+        }
+
+        return [
+            'timeout' => self::HTTP_TIMEOUT_SECONDS,
+            'context' => ['ssl' => $ssl],
+        ];
+    }
+
+    /**
      * Deferral interval, in seconds, for the ONE-SHOT download timer.
      *
      * 0 = "run on the next event-loop tick", which is the entire intent of the
@@ -1059,7 +1129,11 @@ final class TitleDumpIndexer
         /** @var array{done: bool, body: ?string} $state */
         $state = ['done' => false, 'body' => null];
 
-        $client = new Client(['timeout' => 60]);
+        // M-ANIDB-08: strict TLS verification is NOT the vendored default —
+        // the pool's base context accepts any certificate unless the caller
+        // overlays context.ssl, and the overlay replaces the whole ssl
+        // sub-array (peer_name included). One source of truth: the config.
+        $client = new Client(self::httpClientConfig($url));
         $client->request($url, [
             'method'  => 'GET',
             'headers' => [

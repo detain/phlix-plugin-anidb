@@ -22,7 +22,11 @@ Consumption happens through the host metadata registry instead:
 2. **Self-registration.** `AnidbMetadataProvider::onEnable()`
    (`src/AnidbMetadataProvider.php`) resolves the host
    `Phlix\Media\Metadata\MetadataManager` from the container and calls
-   `registerProvider('anidb', new AnidbMetadataProviderAdapter($this), ['anime','series'])`.
+   `registerProvider('anidb', $this->adapter(), $this->supportedMediaTypes())`, where
+   `supportedMediaTypes()` returns `['series', 'movie']` — the media types the host
+   actually keys lookups by. AniDB is anime *content*, but "anime" is not a host
+   media-type: series items are matched under `series` and anime movies under
+   `movie` (pinned by `test_supported_media_types_are_series_and_movie_only`).
    This mirrors the built-in `Phlix\Plugins\Oidc\Plugin::onEnable()`
    (`phlix-server/src/Plugins/Oidc/Plugin.php:53–71`) and
    `Phlix\Plugins\Ldap\Plugin::onEnable()`

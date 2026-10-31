@@ -17,6 +17,10 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- `docs/HOST_INTEGRATION.md` no longer claims registration carries `['anime','series']`
+  (M-ANIDB-03, review anidb__docmaint M3): the media-type ghost is replaced with the
+  registered truth — `supportedMediaTypes()` returns `['series', 'movie']`, and "anime"
+  is not a host media-type.
 - `genres` documentation now matches parser reality (categories are not
   fetched; the key is always empty) — `45955a4` (2026-10-29).
 - `cache_dir` is declared in `plugin.json` so the documented cache knob is

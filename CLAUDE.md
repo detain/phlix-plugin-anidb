@@ -41,7 +41,7 @@ php scripts/security-audit-check.php        # blocking security gate: composer a
 
 - `declare(strict_types=1);` and the `@copyright`/`@license` docblock at the top of every PHP file (see `src/` and `tests/`).
 - Test namespace `Phlix\Anidb\Tests\` (autoload-dev in `composer.json`); test private methods via `ReflectionClass` + `setAccessible(true)`, cover edge cases with `static` data providers, and inject the seams instead of hitting the network.
-- `lookup()` return shape is fixed — keys `title`, `original_name`, `overview`, `year`, `genres`, `rating`, `vote_count`, `poster_url`, `fanart_url`, `episodes`, `type`, `anidb_id`, `titles`, `status`, `runtime_ticks`, `studio`, `studios`, `source`, `is_movie`, `synonyms`, `episode_number` (full list in `README.md`).
+- `lookup()` return shape: 21 fixed keys (`title`, `original_name`, `overview`, `year`, `genres`, `rating`, `vote_count`, `poster_url`, `fanart_url`, `episodes`, `type`, `anidb_id`, `titles`, `status`, `runtime_ticks`, `studio`, `studios`, `source`, `is_movie`, `synonyms`, `description_fetch_failed`) **plus optional `episode_number`** — present only when the filename yields one (absent, never null); full list in `README.md`.
 - AniDB UDP rules: ≥4s between packets, reuse one local port, PING ~30 min to keep the session. Never exceed flood limits.
 - `onEnable()` does wiring only — no network/disk/socket I/O (it runs in every resident worker at boot); downloads and index loads are deferred to `ensureConnected()`.
 - Title-dump cache dir must live outside the plugin tree: explicit ctor arg → `$settings['cache_dir']` → env `PHLIX_ANIDB_CACHE_DIR` → `sys_get_temp_dir()`.

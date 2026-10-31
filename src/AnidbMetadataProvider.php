@@ -671,8 +671,14 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      *     is_movie: bool,
      *     description_fetch_failed: bool,
      *     synonyms: list<string>,
-     *     episode_number: int|null
-     * }|array{} Matched anime metadata or empty array when not found.
+     *     episode_number?: int
+     * }|array{} Matched anime metadata, or empty array when not found.
+     *
+     * `episode_number` is the ONE optional key: it is present only when the
+     * filename yielded an episode number — when absent it is ABSENT, never
+     * present-as-null. Consumers must treat it as `?? null`, not assume a
+     * fixed 22-key set. (`mapToMetadataReturn()` — the adapter path too —
+     * always returns exactly the 21 fixed keys without it.)
      */
     public function lookup(string $filePath): array
     {

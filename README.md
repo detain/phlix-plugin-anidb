@@ -141,7 +141,7 @@ See the [AniDB UDP API docs](https://wiki.anidb.net/UDP_API_Definition) for full
     'source'        => null,                     // Source material, when known
     'is_movie'      => false,                    // Derived from type / filename pattern
     'synonyms'      => ['Crest of the Stars'],   // Short/synonym titles from the ANIME response (field 10)
-    'episode_number' => 1,                       // Parsed from the filename (null if absent)
+    'episode_number' => 1,                       // Parsed from the filename; key is ABSENT (not null) when the filename yields none
 ]
 ```
 

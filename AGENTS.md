@@ -30,7 +30,7 @@ CI mirrors this via `.github/workflows/test.yml` (`phpunit` job on PHP 8.3 + 8.4
 
 - `declare(strict_types=1);` and the `@copyright`/`@license` docblock in every PHP file (`php scripts/add-copyright-headers.php src`).
 - Tests namespace `Phlix\Anidb\Tests\`; reach private methods with `ReflectionClass` + `setAccessible(true)`; edge cases via `static` data providers; inject the seams instead of hitting the network.
-- `lookup()` returns a fixed key set (`title`, `original_name`, `overview`, `year`, `genres`, `rating`, `vote_count`, `poster_url`, `fanart_url`, `episodes`, `type`, `anidb_id`, `titles`, `status`, `runtime_ticks`, `studio`, `studios`, `source`, `is_movie`, `synonyms`, `description_fetch_failed`, `episode_number`) or `[]`.
+- `lookup()` returns `[]` or a map with the 21 fixed keys (`title`, `original_name`, `overview`, `year`, `genres`, `rating`, `vote_count`, `poster_url`, `fanart_url`, `episodes`, `type`, `anidb_id`, `titles`, `status`, `runtime_ticks`, `studio`, `studios`, `source`, `is_movie`, `synonyms`, `description_fetch_failed`) **plus the optional `episode_number` (int)** — that key is present only when the filename yields an episode number (absent, never null).
 - `onEnable()` is wiring only — no network/disk I/O; defer to `ensureConnected()` on first lookup.
 - AniDB UDP: ≥4s between packets, reuse one local port, PING ~30 min. No PDO/raw mysqli.
 - Keep `composer-audit` LAST in `.github/workflows/test.yml` with no `continue-on-error`, no `if:` and no `--no-dev`; `tests/Unit/SecurityAuditCheckTest.php` parses the workflow and fails on those edits.

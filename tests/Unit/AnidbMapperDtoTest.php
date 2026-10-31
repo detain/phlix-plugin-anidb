@@ -98,8 +98,8 @@ final class AnidbMapperDtoTest extends TestCase
             'カウボーイビバップ', // 7: kanji
             'Cowboy Bebop: The Movie', // 8: english
             '',          // 9: other
-            'CB',        // 10: parsed by the parser into `synonyms`
-            '',          // 11: synonyms position on the wire (parser ignores it)
+            'CB',        // 10: short_names (M-ANIDB-11: flows into `titles`, NOT `synonyms`)
+            'Bebop',     // 11: synonyms (read since M-ANIDB-11; was ignored forever)
             '26',        // 12: episodes
             '26',        // 13: highest_ep
             '0',         // 14: specials
@@ -224,7 +224,9 @@ final class AnidbMapperDtoTest extends TestCase
         $this->assertSame('https://cdn-eu.anidb.net/images/main/42.jpg', $mapped['poster_url']);
         $this->assertFalse($mapped['is_movie']);
         $this->assertFalse($mapped['description_fetch_failed']);
-        $this->assertContains('CB', $mapped['synonyms']);
+        $this->assertSame(['Bebop'], $mapped['synonyms']);
+        $this->assertContains('CB', $mapped['titles']);
+        $this->assertContains('Bebop', $mapped['titles']);
         $this->assertSame('Finished', $mapped['status']);
     }
 

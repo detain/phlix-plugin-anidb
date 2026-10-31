@@ -17,6 +17,15 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- 230 ANIME `synonyms` now reads its OWN column (M-ANIDB-11, review
+  anidb__srphp M1): the parser mapped amask field 10 (`short_names`) into
+  `synonyms` and never read field 11 — short names persisted as synonyms and
+  AniDB's real synonym list never reached the database. Parser and `AnimeDto`
+  now carry BOTH lists separately; the titles corpus merges them (visible
+  title content preserved), the `synonyms` return key finally means synonyms.
+  Three tests that encoded the old mapping were flipped to the wire-truth
+  shape (field-indexed fixtures in `AnidbMapperDtoTest` now distinguish the
+  two columns).
 - Title-dump fetch refuses redirects and makes cleartext loud (M-ANIDB-10,
   review anidb__secaudit M3): `dumpRequestOptions()` pins
   `allow_redirects.max = 0` — a 301 can no longer walk an https download down

@@ -913,10 +913,15 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     {
         $dto = AnimeDto::fromParsedArray($anime);
 
+        // M-ANIDB-11: short_names and synonyms are now the SEPARATE true lists
+        // (parser fields 10 and 11 respectively). The titles corpus merges
+        // both — previously it only ever saw short_names mislabeled as
+        // synonyms, so AniDB's real synonym titles never reached the DB.
         $allTitles = array_filter(array_merge(
             [$dto->romaji],
             $dto->english !== '' ? [$dto->english] : [],
             $dto->kanji !== '' ? [$dto->kanji] : [],
+            $dto->short_names,
             $dto->synonyms
         ));
 

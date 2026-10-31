@@ -156,7 +156,12 @@ final class AnimeResponseParser
             'english'        => self::decode($fields[8]),
             'kanji'          => self::decode($fields[7]),
             'other'          => self::decode($fields[9]),
-            'synonyms'       => array_filter(array_map('trim', explode(',', self::decode($fields[10])))),
+            // M-ANIDB-11 (review anidb__srphp M1): the amask layout is
+            // 10 = short_names, 11 = synonyms. This line used to read 10 into
+            // `synonyms` and never touch 11 — short names were persisted as
+            // synonyms while AniDB's REAL synonym list never reached the DB.
+            'short_names'    => array_values(array_filter(array_map('trim', explode(',', self::decode($fields[10]))))),
+            'synonyms'       => array_values(array_filter(array_map('trim', explode(',', self::decode($fields[11]))))),
             'episodes'       => $episodes,
             'specials'       => self::boundedInt($fields[14], 1_000_000),
             'highest_ep'     => self::boundedInt($fields[13], 1_000_000),

@@ -32,7 +32,8 @@ readonly class AnimeDto
      * @param string $english Official English title.
      * @param string $kanji Japanese title.
      * @param string $other Other title variant.
-     * @param list<string> $synonyms List of synonym titles.
+     * @param list<string> $short_names AniDB short_names (amask field 10).
+     * @param list<string> $synonyms AniDB synonyms (amask field 11).
      * @param int $episodes Total episode count.
      * @param int $specials Total special count.
      * @param int $highest_ep Highest episode number.
@@ -62,6 +63,7 @@ readonly class AnimeDto
         public string $english,
         public string $kanji,
         public string $other,
+        public array $short_names,
         public array $synonyms,
         public int $episodes,
         public int $specials,
@@ -102,6 +104,7 @@ readonly class AnimeDto
             english: self::toString($data['english'] ?? null),
             kanji: self::toString($data['kanji'] ?? null),
             other: self::toString($data['other'] ?? null),
+            short_names: self::toListOfStrings($data['short_names'] ?? null),
             synonyms: self::toListOfStrings($data['synonyms'] ?? null),
             episodes: self::toInt($data['episodes'] ?? null),
             specials: self::toInt($data['specials'] ?? null),

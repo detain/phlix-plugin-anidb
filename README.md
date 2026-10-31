@@ -140,7 +140,7 @@ See the [AniDB UDP API docs](https://wiki.anidb.net/UDP_API_Definition) for full
     'studios'       => [],                       // Same, as a list
     'source'        => null,                     // Source material, when known
     'is_movie'      => false,                    // Derived from type / filename pattern
-    'synonyms'      => ['Crest of the Stars'],   // Short/synonym titles from the ANIME response (field 10)
+    'synonyms'      => ['Crest of the Stars'],   // True synonyms from the ANIME response (field 11); short_names (field 10) also feed 'titles'
     'episode_number' => 1,                       // Parsed from the filename; key is ABSENT (not null) when the filename yields none
 ]
 ```

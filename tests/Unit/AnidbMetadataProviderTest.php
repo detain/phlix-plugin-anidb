@@ -325,7 +325,8 @@ final class AnidbMetadataProviderTest extends TestCase
         $this->assertSame(13, $result['episodes']);
         $this->assertSame(1999, $result['year_int']);
         $this->assertSame(8.53, $result['rating']); // 853/100 = 8.53
-        $this->assertSame(['Seikai'], $result['synonyms']);
+        $this->assertSame(['Crest'], $result['synonyms']);   // M-ANIDB-11: field 11
+        $this->assertSame(['Seikai'], $result['short_names']); // M-ANIDB-11: field 10
         // categories is not included in amask=00f0f0f0000000 — returns honest empty
         $this->assertSame([], $result['categories']);
     }

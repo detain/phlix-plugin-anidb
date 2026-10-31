@@ -122,6 +122,9 @@ final class AnimeResponseParserTest extends TestCase
 
     public function test_parse_parses_synonyms_as_comma_separated(): void
     {
+        // M-ANIDB-11 (review anidb__srphp M1): amask layout is 10 = short_names,
+        // 11 = synonyms. This test used to ENCODE the bug — it asserted the
+        // short_names column landed in `synonyms`; field 11 was never read.
         $response = $this->buildFullResponse([
             'short_names' => 'Short Name 1, Short Name 2,Short Name 3',
             'synonyms' => 'Synonym 1,Synonym 2',
@@ -129,9 +132,8 @@ final class AnimeResponseParserTest extends TestCase
 
         $result = $this->parser->parseAnimeResponse($response);
 
-        $this->assertContains('Short Name 1', $result['synonyms']);
-        $this->assertContains('Short Name 2', $result['synonyms']);
-        $this->assertContains('Short Name 3', $result['synonyms']);
+        $this->assertSame(['Synonym 1', 'Synonym 2'], $result['synonyms']);
+        $this->assertSame(['Short Name 1', 'Short Name 2', 'Short Name 3'], $result['short_names']);
     }
 
     public function test_parse_rating_calculation(): void

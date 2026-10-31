@@ -15,14 +15,17 @@ use Socket;
 /**
  * Default, production {@see UdpClientInterface} implementation.
  *
- * Wraps the non-blocking `socket_*` lifecycle (create / bind / sendto / select +
+ * Wraps the timeout-bounded `socket_*` lifecycle (create / bind / sendto / select +
  * recvfrom / close). Compared to the original inline implementation:
  *
  * - AF_INET / SOCK_DGRAM / SOL_UDP socket, SO_REUSEADDR set;
  * - bound to a local port above 1024 (a preferred port, sliding across a small
  *   window if taken) to keep a stable source port for AniDB;
- * - 10s send/receive timeouts via `socket_select()` (non-blocking poll) so the
- *   calling worker is never parked on `socket_recvfrom`;
+ * - send/receive waits bounded to 10 s via `socket_select()`: the wait is
+ *   bounded and readable, but it is a real wall-clock wait — the calling
+ *   worker is occupied for up to 10 s when no reply arrives (select parks the
+ *   process just as long as a blocking recvfrom with SO_RCVTIMEO would; the
+ *   difference is the mechanism, not the occupation);
  * - {@see send()} sendto's the datagram then uses `socket_select()` to wait
  *   for data availability before reading up to 1400 bytes, returning the trimmed
  *   payload (or null on timeout);
@@ -171,9 +174,12 @@ final class SocketUdpClient implements UdpClientInterface
     /**
      * {@inheritDoc}
      *
-     * Uses non-blocking I/O via `socket_select()` to wait for data availability
-     * before reading. This replaces the original blocking `socket_recvfrom` call
-     * and ensures the calling worker is never parked for the full 10s timeout.
+     * Waits for data availability with `socket_select()` (10 s budget) before
+     * the single `socket_recvfrom`, replacing the bare blocking read. Honest
+     * budget: a silent AniDB parks this call — and with it the worker task
+     * that made it — for the full ~10 s; only the syscall the process sits in
+     * differs from the old blocking read. (Full async UDP I/O is the open
+     * M-ANIDB-16 architecture question, not a transport detail.)
      */
     public function send(string $data): ?string
     {
@@ -194,7 +200,8 @@ final class SocketUdpClient implements UdpClientInterface
             return null;
         }
 
-        // Use socket_select() for non-blocking wait on data availability.
+        // socket_select() bounds the wait for data availability to 10 s — a
+        // bounded, readable wait, but still a wall-clock occupation (see header).
         // This replaces the blocking socket_recvfrom that previously parked
         // the worker for up to 10 seconds.
         $read = [$this->socket];

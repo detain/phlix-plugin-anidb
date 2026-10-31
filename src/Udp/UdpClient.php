@@ -156,7 +156,8 @@ final class UdpClient
      * Send a command to AniDB with automatic session management.
      *
      * AUTH is performed lazily on first command when sessionKey is null,
-     * keeping the caller non-blocking. The first command after a session
+     * deferring all socket work off the construction path. The first command
+     * after a session
      * expiry (506) will also trigger re-auth.
      *
      * @param string $command   The command to send (without session key).

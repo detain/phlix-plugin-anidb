@@ -17,6 +17,15 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- Misleading "non-blocking"/"never parked" claims removed (M-ANIDB-07, review
+  anidb__docmaint M7): `SocketUdpClient`'s header/send docs now state the 10 s
+  select wait is a bounded WALL-CLOCK occupation of the calling worker (the
+  mechanism differs from a blocking recvfrom; the parking does not), the
+  indexer's `usleep(1000)` cooperative-wait docblock admits the busy-poll
+  occupies the worker for up to its 60 s budget while crediting that no
+  synchronous socket read happens in-thread, and `UdpClient::sendCommand` no
+  longer calls itself "non-blocking". Full async I/O remains the M-ANIDB-16
+  architecture question.
 - `lookup()` return-shape contract stated truthfully everywhere (M-ANIDB-06,
   review anidb__docmaint M6): `episode_number` is the ONE optional key (present
   only when the filename yields one — absent, never null). The docblock shape,

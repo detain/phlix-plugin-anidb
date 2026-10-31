@@ -1028,9 +1028,13 @@ final class TitleDumpIndexer
      * Default non-blocking HTTP client using {@see \Workerman\Http\Client}.
      *
      * Uses the canonical cooperative-wait pattern from phlix-server/CLAUDE.md:
-     * fire the async request, then poll `usleep(1000)` yielding to the event
-     * loop until the success/error callback flips a done flag (or the max wait
-     * elapses). This NEVER blocks the worker on a synchronous socket read.
+     * fire the async request, then poll `usleep(1000)` until the success/error
+     * callback flips a done flag (or the 60 s max wait elapses). The socket
+     * read itself always happens inside Workerman's event loop, so this method
+     * never performs a synchronous socket read — but be honest about the rest:
+     * the busy-poll OCCUPIES the calling worker task for up to the full 60 s
+     * wait (wall-clock; `usleep` yields the CPU, not the worker). A fully
+     * non-blocking client is the open M-ANIDB-16 architecture question.
      *
      * When the Workerman runtime is unavailable (unit tests / CLI), we return
      * null immediately rather than falling back to a blocking

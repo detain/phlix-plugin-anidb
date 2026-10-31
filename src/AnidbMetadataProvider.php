@@ -317,16 +317,26 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         if ($this->connected) {
             return;
         }
-        $this->connected = true;
 
-        $this->udpSession->open();
-
+        // Title-dump branch runs BEFORE open() (review anidb__srphp M4): the
+        // offline index is independent of the UDP half, so a socket failure
+        // must not skip scheduling/loading it — a provider that cannot open
+        // degrades to a dump-assisted one, never to nothing.
         if ($this->titleDumpManager !== null) {
-            // Schedules the (deferred, non-blocking) download and loads the
+            // Schedules the (lazy, bounded-wait) download and loads the
             // offline index from the writable cache dir.
             $this->titleDumpManager->ensureCacheDir();
             $this->titleDumpManager->ensureLoaded();
         }
+
+        // `connected` flips ONLY after a successful open() (review
+        // anidb__srphp M4): the old set-then-open order turned a transient
+        // failure — e.g. a bind collision — into permanent provider death,
+        // because the stuck flag meant open() was never attempted again.
+        // Per-lookup retry semantics let a transient socket failure recover
+        // on the next call.
+        $this->udpSession->open();
+        $this->connected = true;
     }
 
     /**

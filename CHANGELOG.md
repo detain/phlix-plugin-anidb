@@ -17,6 +17,15 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- `ensureConnected()` no longer zombied the provider on a transient socket
+  failure (M-ANIDB-14, review anidb__srphp M4): the old set-then-open order
+  marked the session connected BEFORE `open()` ran, so a single bind/create
+  failure stuck the flag forever — every later command died on "UDP socket
+  not open" and no retry was ever attempted. `connected` now flips only
+  after a successful open, and the title-dump branch runs first, so a
+  UDP-less provider still schedules its offline index instead of losing
+  both halves to one skipped branch.
+
 - UDP transport now tolerates AniDB's framing frames (M-ANIDB-13, review
   anidb__srphp M3): `send()` read exactly one datagram per command, so a
   leading 001 ACK became the AUTH "reply" (regex fail) and a trailing

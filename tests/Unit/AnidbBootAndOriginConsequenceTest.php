@@ -104,6 +104,98 @@ final class AnidbBootAndOriginConsequenceTest extends TestCase
     }
 
     // -------------------------------------------------------------------------
+    // CONNECT ORDERING — review anidb__srphp M4: set-then-open zombied the
+    // provider on the first transient socket failure.
+    // -------------------------------------------------------------------------
+
+    /**
+     * The old order ($connected = true BEFORE open()) turned a transient bind
+     * failure into permanent provider death: the flag stuck, later lookups
+     * never retried open(), and every command died on "UDP socket not open".
+     * open() failure must leave `connected` false so each later lookup
+     * RE-ATTEMPTS the connect step.
+     */
+    public function test_open_failure_is_retried_on_next_lookup_instead_of_zombie_state(): void
+    {
+        $transport = new FlakyOpenTransport(1, ['200 K9SESSIONKEY LOGIN ACCEPTED', null]);
+        $udpSession = new UdpClient(self::SETTINGS, $transport, new RecordingWaiter());
+
+        $provider = new AnidbMetadataProvider(
+            self::SETTINGS,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            $udpSession,
+            $this->cacheDir,
+        );
+
+        $threw = false;
+        try {
+            $provider->resolveAidByTitle('Neon Genesis Evangelion');
+        } catch (\RuntimeException $e) {
+            $threw = true;
+        }
+        $this->assertTrue($threw, 'the first lookup must surface the open failure');
+        $this->assertSame(1, $transport->openCount);
+
+        // The next lookup must ATTEMPT open again. Old code: the stuck flag
+        // skipped open() forever (openCount stays 1) — the zombie this fix
+        // removes.
+        $provider->resolveAidByTitle('Neon Genesis Evangelion');
+        $this->assertSame(
+            2,
+            $transport->openCount,
+            'a transient open failure zombied the provider — connected was never reset'
+        );
+    }
+
+    /**
+     * M4's second half: the title-dump branch sat BEHIND open(), so one socket
+     * failure also silently killed offline-index scheduling. The dump half is
+     * independent of the UDP half and runs first now.
+     */
+    public function test_title_dump_setup_runs_even_when_udp_open_throws(): void
+    {
+        $dumpDir = $this->cacheDir . '/dump-under-open-failure';
+
+        $transport = new FlakyOpenTransport(1, []);
+        $udpSession = new UdpClient(self::SETTINGS, $transport, new RecordingWaiter());
+        $titleDump = new TitleDumpManager($dumpDir, self::SETTINGS['title_dump_url']);
+
+        $provider = new AnidbMetadataProvider(
+            self::SETTINGS,
+            null,
+            null,
+            null,
+            null,
+            null,
+            $titleDump,
+            $udpSession,
+            $this->cacheDir,
+        );
+
+        try {
+            $provider->resolveAidByTitle('some anime');
+            $this->fail('expected the open failure to surface');
+        } catch (\RuntimeException $expected) {
+            // Deliberate: the connect failure propagates — but only AFTER the
+            // dump half has run.
+        }
+
+        $this->assertTrue(is_dir($dumpDir), 'ensureCacheDir never ran — the dump half died with the UDP half');
+        $this->assertTrue($titleDump->isLoaded(), 'ensureLoaded never ran after the open failure');
+
+        // tearDown only clears the top-level dir; remove the substructure here.
+        foreach (array_diff((array) scandir($dumpDir), ['.', '..']) as $entry) {
+            @unlink($dumpDir . '/' . $entry);
+        }
+        @rmdir($dumpDir);
+    }
+
+    // -------------------------------------------------------------------------
     // ORIGIN CHECK — validation must SUCCEED for a realistic dotted-quad IP
     // (the peer reported by recvfrom() is an IP, never the hostname string).
     // -------------------------------------------------------------------------
@@ -277,6 +369,58 @@ final class AnidbBootAndOriginConsequenceTest extends TestCase
  *
  * @internal Test fixture only.
  */
+/**
+ * Transport whose open() throws for the first N calls (then behaves like a
+ * recording fake). Models the transient bind failure of review anidb__srphp M4.
+ */
+final class FlakyOpenTransport implements UdpClientInterface
+{
+    public int $openCount = 0;
+
+    /** @var list<string|null> */
+    private array $responses;
+
+    private int $failuresRemaining;
+
+    /**
+     * @param int              $failuresRemaining number of leading open() calls that throw
+     * @param list<string|null> $responses        canned send() replies
+     */
+    public function __construct(int $failuresRemaining, array $responses)
+    {
+        $this->failuresRemaining = $failuresRemaining;
+        $this->responses = $responses;
+    }
+
+    public function open(): void
+    {
+        ++$this->openCount;
+        if ($this->failuresRemaining > 0) {
+            --$this->failuresRemaining;
+            throw new \RuntimeException('simulated transient bind failure');
+        }
+    }
+
+    public function send(string $data): ?string
+    {
+        return array_shift($this->responses);
+    }
+
+    public function close(): void
+    {
+    }
+
+    public function lastReplyHost(): ?string
+    {
+        return 'api.anidb.net';
+    }
+
+    public function lastReplyPort(): ?int
+    {
+        return 9000;
+    }
+}
+
 final class RecordingOriginTransport implements UdpClientInterface
 {
     /** @var list<string> */

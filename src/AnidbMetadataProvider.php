@@ -116,9 +116,11 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      * High-level UDP session client — encapsulates AUTH, session key, flood
      * protection, keep-alive pings, and 506 re-auth retry.
      *
-     * Initialized in constructor from $settings + injected seams. The onEnable()
-     * hook calls open(); onDisable() calls close(). Tests can inject a
-     * fake UdpClient that returns canned responses.
+     * Initialized in constructor from $settings + injected seams. Boot and
+     * onEnable() are wiring-only: the socket is opened lazily by
+     * {@see ensureConnected()} on the FIRST lookup (an onEnable-time open() was
+     * the item-5c3 boot-hang landmine), and onDisable() calls close(). Tests
+     * can inject a fake UdpClient that returns canned responses.
      */
     private UdpClient $udpSession;
 

@@ -17,6 +17,11 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- Boot-timing docblock lies cured (M-ANIDB-05, review anidb__docmaint M5): the
+  `$udpSession` property docblock no longer claims onEnable() opens the socket
+  (first-lookup lazy connect per item-5c3), and `TitleDumpManager::ensureCacheDir()`
+  no longer claims the index "runs once on plugin enable" — both now state the
+  wiring-only boot / lazy-ensureConnected truth pinned by `AnidbBootAndOriginConsequenceTest`.
 - `docs/HOST_INTEGRATION.md` "Outstanding server-side work" is rewritten to the
   LANDED server truth (M-ANIDB-04, review anidb__docmaint M4): `PluginLoader`
   registers `MetadataSourceInterface` instances into `SourceRegistry`, the

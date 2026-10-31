@@ -305,8 +305,11 @@ final class TitleDumpManager
             mkdir($this->cacheDir, 0755, true);
         }
 
-        // Build and persist the title index if not present or stale.
-        // This runs once on plugin enable; subsequent lookups reuse the cached index.
+        // Build and persist the title index if not present or stale. This runs
+        // on the FIRST lookup (the deferred ensureConnected() path) — boot and
+        // onEnable() are wiring-only, and ensureLoaded() memoizes per process;
+        // the 24 h freshness decision itself lives in
+        // {@see TitleDumpIndexer::downloadAndIndex()} / isStale().
         $indexer = new TitleDumpIndexer(
             $this->cacheDir,
             $this->titleDumpUrl,

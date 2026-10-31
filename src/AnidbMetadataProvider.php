@@ -975,12 +975,17 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     }
 
     /**
-     * Map AniDB start/end dates to a status string.
+     * Map AniDB airing state to a status string.
      *
-     * The dates alone decide: the fetched ANIME response carries no usable
-     * dateflags and AnimeResponseParser never emits them (it parses only
-     * air_date/end_date into start_date/end_date). Every arm returns a
-     * status — there is no null outcome.
+     * Order of authority (review anidb__srphp M7): the ANIME response's
+     * `dateflags` bitmask (amask field 1: 1 = ongoing, 2 = finished airing,
+     * 4 = other) decides when it carries a signal — AniDB's flag is what its
+     * own pages render, while the bare dates can be stale in either direction.
+     * Finished (bit 2) is checked first so a contradictory 3 never reports
+     * "airing". With no usable flag, the dates decide — with one exception:
+     * a movie (is_movie, e.g. end_date-less TV specials) whose start date has
+     * passed is FINISHED, because a movie never "keeps airing" episode by
+     * episode. Every arm returns a status; there is no null outcome.
      *
      * @param AnimeDto $dto Typed parser→mapper boundary value.
      *
@@ -992,12 +997,27 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         $endDate = $dto->end_date ?? 0;
         $now = time();
 
+        // Flag-first: AniDB's own airing-state signal beats any date shape.
+        if (($dto->dateflags & 2) !== 0) {
+            return 'Finished';
+        }
+        if (($dto->dateflags & 1) !== 0) {
+            return 'Currently Airing';
+        }
+
         if ($startDate === 0) {
             return 'Upcoming';
         }
 
         if ($endDate > 0) {
             return $endDate <= $now ? 'Finished' : 'Currently Airing';
+        }
+
+        if ($dto->is_movie) {
+            // A movie with a passed start and no end date finished airing at
+            // its release; the end_date==0 case below would otherwise claim
+            // it is still airing forever (the M7 mislabel).
+            return $startDate <= $now ? 'Finished' : 'Upcoming';
         }
 
         return $startDate <= $now ? 'Currently Airing' : 'Upcoming';

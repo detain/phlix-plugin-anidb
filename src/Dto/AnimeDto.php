@@ -53,6 +53,9 @@ readonly class AnimeDto
      * @param list<string> $studios List of studios/production companies (populated via separate API call).
      * @param string|null $source The source material (e.g. "manga", "light novel", "original").
      * @param string|null $description ANIMEDESC text, or null when absent/not fetched.
+     * @param int $dateflags AniDB dateflags bitmask (amask field 1):
+     *                       1 = ongoing, 2 = finished airing, 4 = other.
+     *                       0 means "no signal" — callers fall back to dates.
      * @param bool $is_movie Parser-computed movie detection flag.
      * @param bool $description_fetch_failed True when the description could not be
      *        retrieved (transport failure) — distinct from "server answered: none".
@@ -84,6 +87,7 @@ readonly class AnimeDto
         public array $studios = [],
         public ?string $source = null,
         public ?string $description = null,
+        public int $dateflags = 0,
         public bool $is_movie = false,
         public bool $description_fetch_failed = false,
     ) {
@@ -125,6 +129,7 @@ readonly class AnimeDto
             studios: self::toListOfStrings($data['studios'] ?? null),
             source: self::toNullableString($data['source'] ?? null),
             description: self::toNullableString($data['description'] ?? null),
+            dateflags: self::toInt($data['dateflags'] ?? 0),
             is_movie: self::toBool($data['is_movie'] ?? false),
             description_fetch_failed: self::toBool($data['description_fetch_failed'] ?? false),
         );

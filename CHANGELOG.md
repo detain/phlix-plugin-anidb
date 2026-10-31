@@ -17,6 +17,15 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- Anime status now consults AniDB's `dateflags` bitmask (M-ANIDB-17, review
+  anidb__srphp M7): the amask field-1 column (1 = ongoing, 2 = finished) was
+  mapped positionally and DISCARDED, so `mapAnimeStatus()` decided on dates
+  alone — every end_date-less movie with a past start read as "Currently
+  Airing" forever, and a stale end date could bury an authoritative ongoing
+  flag. The parser and `AnimeDto` now carry `dateflags`; the mapper is
+  flag-first (finished before ongoing), falls through the date heuristic on
+  "other"/no signal, and adds an `is_movie` fallback for flagless movies.
+
 - The "daily" title dump is finally daily inside a live process
   (M-ANIDB-15, review anidb__srphp M5): `ensureLoaded()` memoized the index
   permanently — including the empty `[]` of a failed cold download — and the

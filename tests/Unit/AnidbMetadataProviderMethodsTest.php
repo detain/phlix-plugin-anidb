@@ -440,6 +440,79 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
         ];
     }
 
+    /**
+     * Review anidb__srphp M7: dateflags are the authoritative airing-state
+     * signal and were never consulted; is_movie never fell back. These pins
+     * hold the flag-first order, the movie fallback, and the "other" bit's
+     * deliberate fall-through to the date heuristic.
+     *
+     * @param int   $startDate epoch start date (0 = unknown)
+     * @param int   $endDate   epoch end date (0 = unknown)
+     * @param int   $dateflags raw amask field-1 bitmask
+     * @param bool  $isMovie   parsed movie flag
+     * @param string $expected status string
+     *
+     * @dataProvider mapAnimeStatusFlagsProvider
+     */
+    public function test_map_anime_status_consults_dateflags_with_movie_fallback(
+        int $startDate,
+        int $endDate,
+        int $dateflags,
+        bool $isMovie,
+        string $expected
+    ): void {
+        $provider = new AnidbMetadataProvider([
+            'username' => 'testuser',
+            'api_key' => 'testkey',
+            'use_title_dump' => false,
+            'title_dump_url' => 'http://example.com/anime-titles.dat.gz',
+        ]);
+
+        $reflection = new \ReflectionClass($provider);
+        $method = $reflection->getMethod('mapAnimeStatus');
+        $method->setAccessible(true);
+
+        $anime = AnimeDto::fromParsedArray([
+            'start_date' => $startDate,
+            'end_date'   => $endDate,
+            'dateflags'  => $dateflags,
+            'is_movie'   => $isMovie,
+        ]);
+
+        $this->assertSame($expected, $method->invoke($provider, $anime));
+    }
+
+    /**
+     * @return array<string, array{int, int, int, bool, string}>
+     */
+    public static function mapAnimeStatusFlagsProvider(): array
+    {
+        $now = time();
+        $past = $now - 86400 * 365;   // 1 year ago
+        $future = $now + 86400 * 365;  // 1 year from now
+
+        return [
+            // Finished bit (2) wins over a past end date... and over dates alone.
+            'finished flag, no end date: finished' => [$past, 0, 2, false, 'Finished'],
+            'finished flag despite past end: finished' => [$past, $past + 86400, 2, false, 'Finished'],
+            // Ongoing bit (1) keeps airing even when the recorded end date is
+            // stale in the past — the flag is authoritative.
+            'ongoing flag, stale past end date: currently airing' => [$past, $past + 86400, 1, false, 'Currently Airing'],
+            // Both bits set is contradictory; finished (2) is checked first.
+            'both bits: finished wins' => [$past, 0, 3, false, 'Finished'],
+            // 'other' (4) carries no airing info -> date heuristic unchanged.
+            'other flag falls through to dates: airing' => [$past, 0, 4, false, 'Currently Airing'],
+            'other flag falls through to dates: upcoming' => [0, 0, 4, false, 'Upcoming'],
+            // The M7 headline: a movie with a past start and no end date is
+            // NOT still airing.
+            'movie, past start, no end, no flags: finished' => [$past, 0, 0, true, 'Finished'],
+            'movie with ongoing flag stays airing' => [$past, 0, 1, true, 'Currently Airing'],
+            // Non-movie, no flags: the old heuristic is preserved byte-for-byte.
+            'series, past start, no end, no flags: airing' => [$past, 0, 0, false, 'Currently Airing'],
+            'future movie stays upcoming until it airs' => [$future, 0, 0, true, 'Upcoming'],
+        ];
+    }
+
     public function test_resolve_cache_dir_from_explicit_argument(): void
     {
         $provider = new AnidbMetadataProvider(

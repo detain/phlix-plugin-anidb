@@ -152,6 +152,12 @@ final class AnimeResponseParser
 
         $anime = [
             'aid'            => $aid,
+            // Field 1 carries AniDB's documented airing-state bitmask
+            // (1 = ongoing, 2 = finished airing, 4 = other). It was previously
+            // mapped positionally and DISCARDED — mapAnimeStatus() had to fall
+            // back to the dates alone (review anidb__srphp M7). Stored bounded
+            // to the byte width the column can legally carry.
+            'dateflags'      => self::boundedInt($fields[1], 255),
             'romaji'         => self::decode($fields[6]),
             'english'        => self::decode($fields[8]),
             'kanji'          => self::decode($fields[7]),

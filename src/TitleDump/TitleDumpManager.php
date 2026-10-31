@@ -22,6 +22,8 @@ namespace Phlix\Anidb\TitleDump;
  * - validateSchema() (private) replaces AnidbMetadataProvider::validateTitleIndexSchema()
  * - ensureCacheDir() replaces AnidbMetadataProvider::ensureCacheDir()
  * - getTitleCachePath() replaces inline path construction
+ * - ensureFresh() re-arms the 24 h download decision on the search hot path
+ *   (review anidb__srphp M5) — the in-memory memo is no longer permanent.
  */
 final class TitleDumpManager
 {
@@ -64,13 +66,64 @@ final class TitleDumpManager
     private string $titleDumpUrl;
 
     /**
-     * @param string $cacheDir     Directory for cached index file.
-     * @param string $titleDumpUrl URL to anime-titles.dat.gz.
+     * Minimum wall-clock between freshness passes on the search hot path
+     * (seconds). The dump is a 24 h artifact; one-minute granularity is
+     * orders finer than anything the cache can produce, and the pass itself
+     * is a stat plus — only when stale — a short-circuiting downloadAndIndex().
      */
-    public function __construct(string $cacheDir, string $titleDumpUrl)
+    private const FRESHNESS_CHECK_INTERVAL_SECONDS = 60;
+
+    /**
+     * The ONE scheduler this process owns (lazily built, {@see indexer()}).
+     * Retained across searches so the indexer's in-process flag and the
+     * cross-process marker guard a single attempt stream (M5).
+     */
+    private ?TitleDumpIndexer $indexer = null;
+
+    /**
+     * Optional transport seam forwarded to the lazily-built indexer; tests
+     * inject a fake, production passes null and the indexer picks its own
+     * default client.
+     *
+     * @var (callable(string,callable):void)|null
+     */
+    private $httpClient;
+
+    /**
+     * mtime of the index file the CURRENT memo was loaded from; null when the
+     * memo has no disk provenance (injected test index, or a load that saw no
+     * readable file). The comparison anchor for reload-on-moved (M5).
+     */
+    private ?int $loadedIndexMtime = null;
+
+    /**
+     * time() of the last freshness pass — the throttle behind ensureFresh().
+     * 0 means "never", so the first search after load always checks.
+     */
+    private int $lastFreshnessCheck = 0;
+
+    /**
+     * @param string                           $cacheDir     Directory for cached index file.
+     * @param string                           $titleDumpUrl URL to anime-titles.dat.gz.
+     * @param (callable(string,callable):void)|null $httpClient Transport seam for the indexer (tests).
+     */
+    public function __construct(string $cacheDir, string $titleDumpUrl, ?callable $httpClient = null)
     {
         $this->cacheDir = $cacheDir;
         $this->titleDumpUrl = $titleDumpUrl;
+        $this->httpClient = $httpClient;
+    }
+
+    /**
+     * Lazily build — then RETAIN — the indexer this manager schedules through.
+     */
+    private function indexer(): TitleDumpIndexer
+    {
+        return $this->indexer ??= new TitleDumpIndexer(
+            $this->cacheDir,
+            $this->titleDumpUrl,
+            $this->httpClient,
+        );
     }
 
     /**
@@ -95,6 +148,9 @@ final class TitleDumpManager
     public function search(string $query): ?int
     {
         $this->ensureLoaded();
+        // Throttled staleness re-entry (review anidb__srphp M5): may replace
+        // the memo via reload-on-moved before this search consults it.
+        $this->ensureFresh();
 
         if ($this->titleIndex === null) {
             return null;
@@ -190,8 +246,14 @@ final class TitleDumpManager
         }
 
         $indexFile = $this->getTitleCachePath();
+        $readable = file_exists($indexFile) && is_readable($indexFile);
 
-        if (file_exists($indexFile) && is_readable($indexFile)) {
+        // Provenance stamp for ensureFresh()'s reload-on-moved: the mtime AT
+        // READ TIME, so a concurrent rewrite shows up as "disk moved" instead
+        // of blending silently into this memo.
+        $this->loadedIndexMtime = $readable ? $this->fileMtime($indexFile) : null;
+
+        if ($readable) {
             $data = file_get_contents($indexFile);
             if ($data !== false) {
                 /** @var mixed $decoded */
@@ -210,8 +272,87 @@ final class TitleDumpManager
             }
         }
 
-        // If no cached index, we'll rely on API lookups
+        // No usable cached index — rely on API lookups. This empty memo is no
+        // longer terminal: ensureFresh() re-reads the disk when a valid file
+        // appears later in the process's life (M5, the 2-byte-incident class).
         $this->titleIndex = [];
+    }
+
+    /**
+     * Re-arm the daily freshness machinery inside a live process
+     * (review anidb__srphp M5).
+     *
+     * Called from {@see search()}. Cost per window: one stat, plus — only
+     * when stale — a downloadAndIndex() that short-circuits on a fresh file,
+     * a held in-flight marker, or a non-writable cache dir, so this can never
+     * become a per-lookup download storm. Between windows it is a single
+     * integer comparison.
+     *
+     * @return void
+     */
+    public function ensureFresh(): void
+    {
+        if (!$this->isLoaded()) {
+            return;
+        }
+
+        $now = time();
+        if (($now - $this->lastFreshnessCheck) < self::FRESHNESS_CHECK_INTERVAL_SECONDS) {
+            return;
+        }
+        $this->lastFreshnessCheck = $now;
+
+        $indexFile = $this->getTitleCachePath();
+
+        if ($this->indexer()->isStale($indexFile)) {
+            // The 24 h TTL + the marker's retry floor finally mean something
+            // in the only context that ever had them: a resident worker.
+            $this->indexer()->downloadAndIndex();
+        }
+
+        $this->reloadIfDiskMoved($indexFile);
+    }
+
+    /**
+     * Drop and re-read the memo when the on-disk index moved under us.
+     *
+     * "Moved" is one of two shapes (M5): the file is NEWER than the load-time
+     * provenance (an async download in THIS process completed, or a sibling
+     * rewrote the shared file), or the memo has no provenance at all yet a
+     * readable file now exists — but only for the EMPTY memo; an injected
+     * non-empty test index has no disk behind it and must never be stomped
+     * by whatever stray file a scratch dir may hold.
+     */
+    private function reloadIfDiskMoved(string $indexFile): void
+    {
+        $mtime = $this->fileMtime($indexFile);
+        if ($mtime === null) {
+            return;
+        }
+
+        $moved = $this->loadedIndexMtime === null
+            ? $this->titleIndex === []
+            : $mtime > $this->loadedIndexMtime;
+
+        if (!$moved) {
+            return;
+        }
+
+        $this->titleIndex = null;
+        $this->exactIndex = null;
+        $this->ensureLoaded();
+    }
+
+    /**
+     * Stat-cache-clearing filemtime accessor: int mtime, or null when the
+     * file is gone/unstatable.
+     */
+    private function fileMtime(string $file): ?int
+    {
+        clearstatcache(false, $file);
+        $mtime = is_file($file) ? filemtime($file) : false;
+
+        return is_int($mtime) ? $mtime : null;
     }
 
     /**
@@ -305,16 +446,12 @@ final class TitleDumpManager
             mkdir($this->cacheDir, 0755, true);
         }
 
-        // Build and persist the title index if not present or stale. This runs
-        // on the FIRST lookup (the deferred ensureConnected() path) — boot and
-        // onEnable() are wiring-only, and ensureLoaded() memoizes per process;
-        // the 24 h freshness decision itself lives in
+        // Kick the first (deferred) download at the first lookup — boot and
+        // onEnable() are wiring-only. This is the SEEDING entry into the same
+        // retained scheduler {@see ensureFresh()} re-arms per search window
+        // (M5); the 24 h freshness decision itself lives in
         // {@see TitleDumpIndexer::downloadAndIndex()} / isStale().
-        $indexer = new TitleDumpIndexer(
-            $this->cacheDir,
-            $this->titleDumpUrl,
-        );
-        $indexer->downloadAndIndex();
+        $this->indexer()->downloadAndIndex();
     }
 
     /**

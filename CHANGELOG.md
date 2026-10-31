@@ -17,6 +17,18 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- The "daily" title dump is finally daily inside a live process
+  (M-ANIDB-15, review anidb__srphp M5): `ensureLoaded()` memoized the index
+  permanently — including the empty `[]` of a failed cold download — and the
+  indexer ran exactly once per provider instance, so a resident worker served
+  boot-day aliases forever (or nothing at all) while `MAX_AGE_SECONDS` and
+  the marker retry floor were dead logic. `search()` now re-enters
+  `downloadAndIndex()` through a throttled per-window freshness pass
+  (one stat between windows), reloads when the file is replaced under the
+  memo (async completion / sibling worker), and recovers an empty memo when
+  a valid file appears. The manager retains ONE scheduler so the
+  short-circuits actually guard a single attempt stream.
+
 - `ensureConnected()` no longer zombied the provider on a transient socket
   failure (M-ANIDB-14, review anidb__srphp M4): the old set-then-open order
   marked the session connected BEFORE `open()` ran, so a single bind/create

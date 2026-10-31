@@ -17,6 +17,11 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- `lookup()` return-shape contract stated truthfully everywhere (M-ANIDB-06,
+  review anidb__docmaint M6): `episode_number` is the ONE optional key (present
+  only when the filename yields one — absent, never null). The docblock shape,
+  README sample annotation, AGENTS.md and CLAUDE.md fixed-key-set claims were
+  all corrected to the 21-fixed-keys + optional-key reality (commit `1ae91ce`).
 - Boot-timing docblock lies cured (M-ANIDB-05, review anidb__docmaint M5): the
   `$udpSession` property docblock no longer claims onEnable() opens the socket
   (first-lookup lazy connect per item-5c3), and `TitleDumpManager::ensureCacheDir()`

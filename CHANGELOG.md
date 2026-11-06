@@ -17,6 +17,23 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- Copy-currency + docs-truth batch (wave 3 L9; review anidb__copywriter #1–#5,
+  anidb__srphp #6[i]): the README install URL pointed at `main/` — the default
+  branch is `master` and the pasted URL 404s, so install step 3 was inert; the
+  tagline link `detain/phlix` (README, AGENTS.md, CLAUDE.md) is a 404 repo,
+  repointed to `detain/phlix-server`; install step 5 said "API Password" where
+  the form renders "AniDB UDP API Key" — the field is now named as labeled; the
+  `title_dump_url` description's colon-spliced sentence was reworded to the
+  clean README phrasing (em-dash, fixed articles); the credentials-guard
+  message now reads "AniDB: username and API key settings are required
+  (missing or empty: …)" with human-style field names, replacing the lowercase
+  `anidb:` prefix and raw `username/api_key` keys (its test pins rotated from a
+  measured red in the same commit). The indexer-lifecycle docblocks — the
+  `$downloadInFlight` property and the SM-0.3a fail-closed box — now describe
+  the post-M5 split (the flag covers same-object re-entry, the marker the
+  worker fleet) with the pre-M5 measured history preserved verbatim in frame
+  (50 fresh indexers → 50 downloads, fail-closed → 0).
+
 - Anime status now consults AniDB's `dateflags` bitmask (M-ANIDB-17, review
   anidb__srphp M7): the amask field-1 column (1 = ongoing, 2 = finished) was
   mapped positionally and DISCARDED, so `mapAnimeStatus()` decided on dates

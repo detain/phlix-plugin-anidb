@@ -58,6 +58,17 @@ final class UdpClient
     private const AUTH_FAILURE_BODY_MAX = 120;
 
     /**
+     * Setting key → human-style field name used in the credential-guard
+     * message, so an operator can map it onto the settings form (whose
+     * labels are "AniDB Username" and "AniDB UDP API Key") instead of
+     * decoding raw setting keys.
+     */
+    private const CREDENTIAL_LABELS = [
+        'username' => 'username',
+        'api_key' => 'API key',
+    ];
+
+    /**
      * Active AniDB session key (null if not authenticated).
      */
     private ?string $sessionKey = null;
@@ -270,16 +281,16 @@ final class UdpClient
     {
         $unusable = [];
 
-        foreach (['username', 'api_key'] as $key) {
+        foreach (self::CREDENTIAL_LABELS as $key => $label) {
             $value = $this->settings[$key] ?? null;
             if (!is_string($value) || $value === '') {
-                $unusable[] = $key;
+                $unusable[] = $label;
             }
         }
 
         if ($unusable !== []) {
             throw new \RuntimeException(
-                'anidb: username/api_key settings are required (missing or empty: '
+                'AniDB: username and API key settings are required (missing or empty: '
                 . implode(', ', $unusable) . ')'
             );
         }

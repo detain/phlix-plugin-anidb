@@ -65,7 +65,7 @@ final class UdpClientCredentialGuardTest extends TestCase
         }
 
         $this->assertInstanceOf(\RuntimeException::class, $thrown);
-        $this->assertStringContainsString('anidb: username/api_key settings are required', $thrown->getMessage());
+        $this->assertStringContainsString('AniDB: username and API key settings are required', $thrown->getMessage());
         $this->assertSame([], $transport->sent, 'a malformed AUTH datagram reached the transport');
         $this->assertSame(0, $transport->openCount);
         $this->assertNull($client->getSessionKey());
@@ -80,7 +80,7 @@ final class UdpClientCredentialGuardTest extends TestCase
         $client = $this->makeClient($settings, $transport);
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('anidb: username/api_key settings are required');
+        $this->expectExceptionMessage('AniDB: username and API key settings are required');
 
         $client->sendCommand('ANIME aid=1');
     }

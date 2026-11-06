@@ -1,6 +1,6 @@
 # phlix-plugin-anidb
 
-AniDB metadata-provider plugin for [Phlix](https://github.com/detain/phlix). Resolves anime metadata via the AniDB UDP API (`api.anidb.net:9000`) and the daily title dump. PHP 8.3+, PSR-4 namespace `Phlix\Anidb\`.
+AniDB metadata-provider plugin for [Phlix](https://github.com/detain/phlix-server). Resolves anime metadata via the AniDB UDP API (`api.anidb.net:9000`) and the daily title dump. PHP 8.3+, PSR-4 namespace `Phlix\Anidb\`.
 
 ## Commands
 

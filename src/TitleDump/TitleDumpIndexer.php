@@ -236,11 +236,13 @@ final class TitleDumpIndexer
      * True between arming the deferred download and the attempt completing.
      *
      * Cheap in-process short-circuit so a repeated {@see downloadAndIndex()}
-     * call on THIS object never re-arms the timer. It is deliberately NOT the
-     * only guard: {@see \Phlix\Anidb\TitleDump\TitleDumpManager::ensureCacheDir()}
-     * builds a fresh indexer on every call, so an instance flag alone would be
-     * bypassed by the very re-entry vector we are defending against — see the
-     * marker file for the cross-instance / cross-worker guard.
+     * call on THIS object never re-arms the timer. Since the M5 pass the
+     * manager RETAINS one scheduler per process
+     * ({@see \Phlix\Anidb\TitleDump\TitleDumpManager::indexer()}), so this
+     * flag genuinely covers the same-object re-entry vector. It is still
+     * deliberately not the only guard: a fleet runs one manager — and one
+     * flag — per worker process, so the marker file remains the cross-
+     * instance / cross-worker guard.
      *
      * Conversely, the marker cannot cover everything either: it is a file, and
      * a file can be deleted under a live attempt (a cache sweep, `rm -rf` of
@@ -448,12 +450,15 @@ final class TitleDumpIndexer
      * │ An earlier revision returned "go ahead" when the marker could not be │
      * │ created for a reason other than contention (unwritable cache dir,    │
      * │ full disk, the directory removed under us). That removed the ONLY    │
-     * │ guard covering the vector this class exists to defend: because       │
-     * │ TitleDumpManager::ensureCacheDir() builds a FRESH indexer on every   │
-     * │ call, the in-process {@see $downloadInFlight} flag catches nothing   │
-     * │ there. Measured: 50 fresh indexers over one `0555` cache dir → 50    │
-     * │ downloads, on BOTH the Select and Swoole loops. Failing closed makes │
-     * │ that 0.                                                              │
+     * │ guard covering the vector this class exists to defend: before the    │
+     * │ M5 retention pass, TitleDumpManager::ensureCacheDir() built a FRESH  │
+     * │ indexer on every call, so the in-process {@see $downloadInFlight}    │
+     * │ flag caught nothing there. Measured, pre-M5: 50 fresh indexers over  │
+     * │ one `0555` cache dir → 50 downloads, on BOTH the Select and Swoole   │
+     * │ loops. Failing closed made that 0. M5 RETAINS one scheduler per      │
+     * │ process, closing the same-object leg — but a fleet still runs one    │
+     * │ manager, and one flag, per worker, so the marker is still the only   │
+     * │ guard spanning it. The fail-closed law stands.                       │
      * │                                                                      │
      * │ The decisive argument is not caution, it is arithmetic: a cache dir  │
      * │ that will not accept a zero-byte marker will not accept              │

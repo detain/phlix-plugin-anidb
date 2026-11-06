@@ -2,7 +2,7 @@
 
 [![tests](https://github.com/detain/phlix-plugin-anidb/actions/workflows/test.yml/badge.svg)](https://github.com/detain/phlix-plugin-anidb/actions/workflows/test.yml)
 
-> AniDB metadata provider plugin for [Phlix](https://github.com/detain/phlix)
+> AniDB metadata provider plugin for [Phlix](https://github.com/detain/phlix-server)
 > — anime titles, descriptions, episodes, ratings via UDP API and daily title dump.
 
 ## Overview
@@ -30,13 +30,14 @@ The plugin is unsigned by design. Install via the Phlix admin UI:
 3. Paste this URL into the **Install from URL** form:
 
    ```
-   https://raw.githubusercontent.com/detain/phlix-plugin-anidb/main/plugin.json
+   https://raw.githubusercontent.com/detain/phlix-plugin-anidb/master/plugin.json
    ```
 
 4. The server downloads and validates the manifest, runs `composer install --no-dev`, and stores a row in the `plugins` table.
 5. Configure your AniDB credentials in the plugin settings form:
    - **Username**: your AniDB username
-   - **API Password**: your AniDB API password (from your AniDB profile, NOT your login password)
+   - **API Key**: your AniDB UDP API Key — the API password you set in your
+     AniDB profile, NOT your login password
 6. Enable the plugin.
 
 ## Requirements

@@ -17,6 +17,65 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- Title-dump ingestion and settings hardening (reviews anidb__srphp #3, #4,
+  #5, #6, #8; anidb__secaudit #1, #3 — program w14 L7, six findings, all
+  measured red on the parent first, register evidence
+  `/tmp/opencode/w14L7-red-parent.txt`):
+  - `isStale()` read a future-dated `title_index.json` as "fresh forever"
+    (a negative `time() - mtime` never exceeds the 24 h cap) and an
+    unstatable file as "0 seconds old" — the daily refresh froze silently
+    for the duration of any clock skew, the exact marker-path failure
+    `markerIsLive()` already refuses. Both arms now mean STALE, mirroring
+    the marker rule; the freshness half moved into a named predicate so the
+    boundary and the arms are testable without a stat race.
+  - `writeIndex()` switched from an in-place `file_put_contents()` to a
+    uniquely-named temp file plus `rename()`: readers can no longer decode
+    a torn 0-byte body mid-truncate, a planted symlink at the index path is
+    refused loudly instead of followed (the write would have gone through
+    the link into an attacker-chosen target), and an index left read-only
+    by an owner-mismatch self-heals instead of blocking every refresh.
+    Rename yields a new inode and mtime, so the manager's
+    reload-on-moved provenance law keeps firing unchanged. The documented
+    but never-enforced "cache_dir MUST NOT be world-writable" contract
+    (plugin.json/README) is now refused at the same construction choke
+    point that rejects relative paths — mode and remedy named, the
+    `PHLIX_ANIDB_CACHE_DIR` twin included; group-writable stays lawful.
+  - The parser's `is_18plus` used a raw `(int)` cast, so leading-digit
+    garbage ("1abc", "+1", " 1") flipped the flag, and `temp_rating`
+    divided unconditionally, giving int `0` where the `?float` DTO
+    declaration (and `rating`'s own null sentinel) mean "no value".
+    `is_18plus` now rides `boundedInt`, admitting only the literal "1";
+    `temp_rating` is null whenever the column carries no usable value.
+  - `parse()` boundary-parses the dump's AID column exactly like the UDP
+    path (M-ANIDB-16): digit-only, length-gated (the int cast saturates,
+    it does not wrap), inside the shared `MAX_AID` ceiling — which moved to
+    `AnimeResponseParser::MAX_AID` as public single source of truth,
+    aliased privately in the indexer. Violating LINES are dropped (the
+    dump's established per-line law) and the refusal is loud: one
+    `REFUSING <n> dump lines with malformed or out-of-range AID` count
+    without echoing any violating line content; the whole-dump zero-entries
+    refusal (review M2) stands over it.
+  - Settings are normalized once in the constructor instead of stored raw
+    — the old shape made `use_title_dump` reads in `onEnable()`/
+    `findAidByTitle()` and `UdpClient::authenticate()`'s credential
+    subscripts warn once per lookup inside a resident worker on partial or
+    wrongly-typed host maps, and a stored string "false" read TRUTHY (a
+    disabled dump silently re-enabled). Declared keys now exist with their
+    plugin.json types from construction on; absent credentials stay silent
+    — `requireCredentials()` remains the descriptive AUTH-time net — and
+    present-but-wrong types are reported once, value-free, then defaulted.
+    (Review anidb__srphp #8[m].)
+
+- Deleted `EpisodeExtractor::isMoviePattern()` and its `MOVIE_PATTERNS`
+  table: nothing in `src/` ever called it (only its own tests did), and its
+  naive substring matching — "Anime S01E01" is clean, but "The Special
+  Edition 01" would have flagged every filename containing " sp" —
+  contradicted the real, type-based movie detection in
+  `AnimeResponseParser::detectIsMovie()`. Dead code with a live-looking
+  name is a wrong-answer magnet for the next contributor; the seven
+  pattern tests went with it. (Review anidb__srphp #7[m].)
+
+
 - The flood interval now gates EVERY packet (review anidb__srphp #1). The
   keep-alive leg sent its PING and the command back-to-back — the gate ran
   once before the ping and refreshed its stamp there — and the 506 re-auth

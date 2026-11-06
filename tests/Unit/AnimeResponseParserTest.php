@@ -162,6 +162,64 @@ final class AnimeResponseParserTest extends TestCase
         $this->assertSame(7.56, $result['temp_rating']);
     }
 
+    /**
+     * PG-154 (review anidb__srphp #4[m]): the absent-temp-rating arm produced
+     * int 0 (`boundedInt() / 100` with 0/100 staying int) while `rating`
+     * carries a null sentinel, and the DTO declares BOTH ratings `?float`.
+     * AnimeDto::toNullableFloat(int 0) faithfully turned the wrong shape into
+     * 0.0 — "rated zero" is a claim; an empty column is the absence of one.
+     */
+    public static function absentTempRatingProvider(): array
+    {
+        return [
+            'zero column'    => ['0'],
+            'empty column'   => [''],
+            'garbage column' => ['12x'],
+            'above ceiling'  => ['1001'],
+        ];
+    }
+
+    /**
+     * @dataProvider absentTempRatingProvider
+     */
+    public function test_parse_temp_rating_without_a_value_is_null(string $column): void
+    {
+        $response = $this->buildFullResponse(['temp_rating' => $column]);
+        $result = $this->parser->parseAnimeResponse($response);
+
+        $this->assertNull($result['temp_rating'], 'no usable temp rating must be null, never 0 or 0.0');
+    }
+
+    /**
+     * PG-154 (review anidb__srphp #4[m] second arm / anidb__secaudit): the
+     * is_18+ flag used a raw `(int)$fields[26] === 1` cast, so any
+     * leading-digit garbage ("1abc") cast to 1 and FLIPPED the flag — the
+     * exact overflow/garbage class M-ANIDB-16 bounded everywhere else. It
+     * now goes through boundedInt, so only the literal "1" sets it.
+     */
+    public static function nineteenPlusGarbageProvider(): array
+    {
+        return [
+            'leading-digit garbage' => ['1abc'],
+            'padded digits'         => [' 1'],
+            'plus-prefixed'         => ['+1'],
+            'saturated'             => ['99999999999999999999'],
+            'wordy'                 => ['yes'],
+            'two'                   => ['2'],
+        ];
+    }
+
+    /**
+     * @dataProvider nineteenPlusGarbageProvider
+     */
+    public function test_parse_is_18plus_ignores_garbage_digit_columns(string $column): void
+    {
+        $response = $this->buildFullResponse(['is_18plus' => $column]);
+        $result = $this->parser->parseAnimeResponse($response);
+
+        $this->assertFalse($result['is_18plus'], 'only the literal "1" may flag 18+');
+    }
+
     public function test_parse_detects_movie_from_type(): void
     {
         // Movie type → is_movie = true

@@ -29,11 +29,14 @@ namespace Phlix\Anidb;
 final class AnimeResponseParser
 {
     /**
-     * Upper bound for a legitimate AniDB AID (review M-ANIDB-16). The public
+     * Upper bound for a legitimate AniDB AID (review M-ANIDB-16, ceiling
+     * extended to the dump path by review anidb__srphp #6[m]). The public
      * AID space is far below this; the cap exists so the identifier can never
-     * carry an integer-overflowed (or injected) digit column into `url`.
+     * carry an integer-overflowed (or injected) digit column into `url` —
+     * nor into the shared title index via TitleDumpIndexer::parse(), which
+     * reuses this constant as its single source of truth.
      */
-    private const MAX_AID = 10_000_000;
+    public const MAX_AID = 10_000_000;
 
     /**
      * Decode escaped characters per AniDB spec.
@@ -147,6 +150,13 @@ final class AnimeResponseParser
         $rating = self::boundedInt($fields[19], 1000);
         $ratingFloat = $rating > 0 ? $rating / 100 : null;
 
+        // Review anidb__srphp #4[m]: temp_rating used to divide UNCONDITIONALLY,
+        // so an absent/zero column produced int 0 while `rating` carries a null
+        // sentinel — and the DTO declares BOTH `?float`. "0.0" is a rating
+        // claim; an empty column is the absence of one. Same shape as rating.
+        $tempRating = self::boundedInt($fields[21], 1000);
+        $tempRatingFloat = $tempRating > 0 ? $tempRating / 100 : null;
+
         $rawType = self::decode($fields[3]);
         $episodes = self::boundedInt($fields[12], 1_000_000);
 
@@ -177,13 +187,17 @@ final class AnimeResponseParser
             'categories'     => $categories,
             'rating'         => $ratingFloat,
             'vote_count'     => self::boundedInt($fields[20], 100_000_000),
-            'temp_rating'    => self::boundedInt($fields[21], 1000) / 100,
+            'temp_rating'    => $tempRatingFloat,
             'temp_vote_count'=> self::boundedInt($fields[22], 100_000_000),
             'start_date'     => self::boundedInt($fields[15], 2_147_483_647) ?: null,
             'end_date'       => self::boundedInt($fields[16], 2_147_483_647) ?: null,
             'url'            => 'https://anidb.net/' . $aid,
             'picname'        => self::decode($fields[18]),
-            'is_18plus'      => (int)$fields[26] === 1,
+            // Review anidb__srphp #4[m] second arm: the old raw `(int)$fields[26]`
+            // cast let leading-digit garbage ("1abc" → 1) flip the 18+ flag —
+            // boundedInt admits only the literal digit columns, so "1" is the
+            // sole truthy value.
+            'is_18plus'      => self::boundedInt($fields[26], 1) === 1,
             // Extended fields (require additional API calls or enhanced mask)
             'studios'        => [], // AniDB basic response doesn't include studios
             'source'         => null, // AniDB uses categories for source info (manga, LN, original)

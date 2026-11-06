@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 namespace Phlix\Anidb\Tests\Unit\TitleDump;
 
+use Phlix\Anidb\AnimeResponseParser;
 use Phlix\Anidb\TitleDump\TitleDumpIndexer;
 use PHPUnit\Framework\TestCase;
 
@@ -130,6 +131,101 @@ DAT;
         $this->assertSame(1, $result[0]['aid']);
     }
 
+    /**
+     * PG-155 (reviews anidb__srphp #6[m] / anidb__secaudit #9[m]): the AID
+     * column used to pass through a bare `(int)` cast, so leading-digit
+     * garbage like "1abc" indexed under AID 1 and a digit column beyond
+     * PHP_INT_MAX saturated to PHP_INT_MAX — both poisoned the shared index
+     * with rows no AniDB lookup can legitimately reference, exactly the
+     * overflow class M-ANIDB-16 closed on the UDP path. parse() now applies
+     * the same ctype_digit + MAX_AID ceiling and drops violating lines.
+     */
+    public static function ceilingAidProvider(): array
+    {
+        return [
+            'leading-digit garbage' => ['1abc'],
+            'trailing garbage'      => ['12x'],
+            'negative'              => ['-5'],
+            'plus-prefixed'         => ['+5'],
+            'saturating overflow'   => ['99999999999999999999'],
+            'just above ceiling'    => ['10000001'],
+            'far above ceiling'     => ['40000000'],
+        ];
+    }
+
+    /**
+     * @dataProvider ceilingAidProvider
+     */
+    public function test_parse_drops_aid_violating_the_shared_ceiling(string $aidColumn): void
+    {
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+        $result = $indexer->parse("{$aidColumn}|main|x-jat|Violating\n7|main|x-jat|Valid\n");
+
+        $this->assertCount(1, $result, 'only the in-range line may be indexed');
+        $this->assertSame(7, $result[0]['aid']);
+    }
+
+    public function test_parse_keeps_aid_at_the_ceiling_boundary(): void
+    {
+        // The ceiling is inclusive, mirroring AnimeResponseParser's AID arm
+        // ($aid > MAX_AID refuses): MAX itself is legitimate, MAX+1 is not.
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+        $result = $indexer->parse(
+            AnimeResponseParser::MAX_AID . "|main|x-jat|At ceiling\n"
+            . (AnimeResponseParser::MAX_AID + 1) . "|main|x-jat|Above ceiling\n"
+        );
+
+        $this->assertCount(1, $result);
+        $this->assertSame(AnimeResponseParser::MAX_AID, $result[0]['aid']);
+    }
+
+    public function test_parse_reports_refused_aid_lines_loudly(): void
+    {
+        // Review M-ANIDB-16's "loud" discipline: dropping is not silent. The
+        // notice names the count and the ceiling — never the violating line
+        // content, which is untrusted dump data (log-injection class).
+        $tmpDir = sys_get_temp_dir() . '/title_dump_test_' . uniqid();
+        mkdir($tmpDir, 0755, true);
+        $logFile = $tmpDir . '/stderr.log';
+        $restoreLog = $this->sinkErrorLog($logFile);
+
+        try {
+            $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+            $indexer->parse("1abc|main|x-jat|Garbage aid\n99999999999999999999|main|x-jat|Overflow aid\n7|main|x-jat|Valid\n");
+
+            $logged = file_get_contents($logFile);
+            $this->assertIsString($logged);
+            $this->assertStringContainsString('REFUSING 2 dump lines with malformed or out-of-range AID', $logged);
+            $this->assertStringNotContainsString('Garbage aid', $logged, 'violating line content must not reach the log');
+        } finally {
+            $restoreLog();
+            $this->recursiveDelete($tmpDir);
+        }
+    }
+
+    public function test_parse_does_not_report_a_clean_dump(): void
+    {
+        $tmpDir = sys_get_temp_dir() . '/title_dump_test_' . uniqid();
+        mkdir($tmpDir, 0755, true);
+        $logFile = $tmpDir . '/stderr.log';
+        $restoreLog = $this->sinkErrorLog($logFile);
+
+        try {
+            $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+            $indexer->parse(self::FIXTURE_DAT);
+
+            $logged = @file_get_contents($logFile);
+            $this->assertStringNotContainsString(
+                'out-of-range AID',
+                is_string($logged) ? $logged : '',
+                'a clean dump must not carry a refusal notice'
+            );
+        } finally {
+            $restoreLog();
+            $this->recursiveDelete($tmpDir);
+        }
+    }
+
     public function test_parse_groups_multiple_titles_under_same_aid(): void
     {
         $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
@@ -244,6 +340,51 @@ DAT;
         } finally {
             unlink($tmpFile);
         }
+    }
+
+    /**
+     * PG-152 (review anidb__srphp #5[m]): a future-dated index used to read
+     * "fresh forever" because `(time() - $mtime) > MAX_AGE` is negative —
+     * never > 86400. A backwards NTP step, a restored snapshot, or the very
+     * `touch -d` the SM-0.3a runbook hands operators froze the daily refresh
+     * for the whole skew. The marker path already treats the future as dead
+     * ({@see TitleDumpIndexer::markerIsLive()}); isStale now mirrors that rule.
+     */
+    public function test_isStale_returns_true_for_future_dated_index(): void
+    {
+        $tmpFile = tempnam(sys_get_temp_dir(), 'title_index_') . '.json';
+        file_put_contents($tmpFile, '[]');
+        // One hour ahead of the clock — any of the skew causes above.
+        $this->assertTrue(touch($tmpFile, time() + 3600));
+
+        try {
+            $indexer = new TitleDumpIndexer(dirname($tmpFile), 'http://example.com/anime-titles.dat.gz');
+
+            $this->assertTrue($indexer->isStale($tmpFile), 'a future mtime means the clock or the file moved — treat as stale, not immortal');
+        } finally {
+            unlink($tmpFile);
+        }
+    }
+
+    /**
+     * PG-152, second arm: an unstatable mtime (filemtime() === false — the
+     * file vanished between is_file() and the stat, or an EIO on the mount)
+     * used to subtract as `time() - false` → "0 seconds old" → fresh, again
+     * freezing the refresh while proving nothing about the file. The rule
+     * mirrors markerIsLive(): unknown age is reclaimable/stale, never fresh.
+     */
+    public function test_isStale_treats_unreadable_mtime_as_stale(): void
+    {
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+
+        $method = new \ReflectionMethod(TitleDumpIndexer::class, 'indexMtimeIsFresh');
+        $method->setAccessible(true);
+
+        $this->assertFalse($method->invoke($indexer, false), 'false mtime must never mean fresh');
+        $this->assertFalse($method->invoke($indexer, time() + 1), 'future mtime must never mean fresh');
+        $this->assertTrue($method->invoke($indexer, time()), 'current mtime is fresh');
+        $this->assertTrue($method->invoke($indexer, time() - TitleDumpIndexer::MAX_AGE_SECONDS), 'the age boundary itself stays fresh');
+        $this->assertFalse($method->invoke($indexer, time() - TitleDumpIndexer::MAX_AGE_SECONDS - 1), 'one second past the boundary is stale');
     }
 
     // -------------------------------------------------------------------------
@@ -628,6 +769,121 @@ DAT;
             $this->assertStringContainsString('could not be JSON-encoded', $logged);
         } finally {
             $restoreLog();
+            $this->recursiveDelete($tmpDir);
+        }
+    }
+
+    /**
+     * PG-153 (review anidb__secaudit #1[m]): file_put_contents() FOLLOWS a
+     * symlink at the destination — an attacker who can plant
+     * `title_index.json -> <victim>` in the cache dir (the documented
+     * world-writable misconfiguration) turned every refresh into a write
+     * through their link. writeIndex now refuses a symlinked index path
+     * loudly; the target must survive byte-identical.
+     */
+    public function test_writeIndex_refuses_a_symlinked_index_path(): void
+    {
+        $tmpDir = sys_get_temp_dir() . '/title_dump_test_' . uniqid();
+        mkdir($tmpDir, 0755, true);
+        $victim = $tmpDir . '/victim.txt';
+        $indexFile = $tmpDir . '/title_index.json';
+        file_put_contents($victim, 'ORIGINAL');
+        $this->assertTrue(symlink($victim, $indexFile));
+
+        $logFile = $tmpDir . '/stderr.log';
+        $restoreLog = $this->sinkErrorLog($logFile);
+
+        try {
+            $indexer = new TitleDumpIndexer($tmpDir, 'https://example.test/anime-titles.dat.gz', static function (): void {
+            });
+
+            $method = new \ReflectionMethod(TitleDumpIndexer::class, 'writeIndex');
+            $method->setAccessible(true);
+
+            $this->assertFalse(
+                $method->invoke($indexer, [['aid' => 1, 'titles' => [['title' => 'X', 'type' => 'main', 'lang' => 'en']]]]),
+                'a symlinked index path must refuse the write, never follow it'
+            );
+            $this->assertSame('ORIGINAL', file_get_contents($victim), 'the symlink target must be untouched');
+            $this->assertTrue(is_link($indexFile), 'the refusal must not consume or replace the link either');
+
+            $logged = file_get_contents($logFile);
+            $this->assertIsString($logged);
+            $this->assertStringContainsString('symbolic link', $logged);
+        } finally {
+            $restoreLog();
+            $this->recursiveDelete($tmpDir);
+        }
+    }
+
+    /**
+     * PG-153 (reviews anidb__srphp #3[m] / anidb__secaudit #1): the in-place
+     * overwrite tore — a reader (TitleDumpManager::ensureLoaded) could stat a
+     * present file, open it mid-truncate, and decode a zero/partial body,
+     * and it could not replace an index left read-only by an earlier
+     * owner-mismatch. Writing a uniquely-named temp file and rename()ing it
+     * over the destination makes the swap atomic (POSIX replaces the whole
+     * directory entry, destination file mode irrelevant), and a rename
+     * produces a NEW inode with a NEW mtime — so the manager's
+     * reload-on-moved provenance law keeps firing.
+     */
+    public function test_writeIndex_replaces_atomically_and_leaves_no_temp_files(): void
+    {
+        $tmpDir = sys_get_temp_dir() . '/title_dump_test_' . uniqid();
+        mkdir($tmpDir, 0755, true);
+        $indexFile = $tmpDir . '/title_index.json';
+
+        // Pre-existing read-only index (an owner-mismatch/stale-flock relic):
+        // the old in-place write could not touch it; atomic rename can.
+        file_put_contents($indexFile, '[]');
+        chmod($indexFile, 0444);
+
+        try {
+            $indexer = new TitleDumpIndexer($tmpDir, 'https://example.test/anime-titles.dat.gz', static function (): void {
+            });
+
+            $method = new \ReflectionMethod(TitleDumpIndexer::class, 'writeIndex');
+            $method->setAccessible(true);
+
+            $oldInode = @lstat($indexFile)['ino'];
+
+            $this->assertTrue($method->invoke($indexer, [[
+                'aid'    => 42,
+                'titles' => [['title' => 'Hellsing', 'type' => 'main', 'lang' => 'x-jat']],
+            ]]));
+
+            $this->assertStringContainsString('Hellsing', file_get_contents($indexFile));
+            $this->assertNotSame(@lstat($indexFile)['ino'], $oldInode, 'rename must yield a NEW inode so the manager reloads on moved');
+
+            $strays = array_values(array_diff(scandir($tmpDir), ['.', '..', 'title_index.json']));
+            $this->assertSame([], $strays, 'the temp step must not litter the cache dir');
+        } finally {
+            $this->recursiveDelete($tmpDir);
+        }
+    }
+
+    /**
+     * PG-153, failure leg: when the final rename fails, the temp file must
+     * not survive to accumulate on every retry. A read-only DIRECTORY makes
+     * the temp create itself fail — the write must report false and leave
+     * the directory exactly as it found it.
+     */
+    public function test_writeIndex_leaves_nothing_behind_when_the_temp_write_fails(): void
+    {
+        $tmpDir = sys_get_temp_dir() . '/title_dump_test_' . uniqid();
+        mkdir($tmpDir, 0755, true);
+        chmod($tmpDir, 0555);
+
+        try {
+            $indexer = new TitleDumpIndexer($tmpDir, 'https://example.test/anime-titles.dat.gz', static function (): void {
+            });
+
+            $method = new \ReflectionMethod(TitleDumpIndexer::class, 'writeIndex');
+            $method->setAccessible(true);
+
+            $this->assertFalse(@$method->invoke($indexer, [['aid' => 1, 'titles' => []]]));
+        } finally {
+            chmod($tmpDir, 0755);
             $this->recursiveDelete($tmpDir);
         }
     }

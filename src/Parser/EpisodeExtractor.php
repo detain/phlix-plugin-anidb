@@ -23,19 +23,6 @@ namespace Phlix\Anidb\Parser;
 final class EpisodeExtractor
 {
     /**
-     * Common anime filename patterns that indicate a movie/OVA special
-     * rather than a regular episode (these typically have part numbers).
-     *
-     * @var array<string>
-     */
-    private const MOVIE_PATTERNS = [
-        'movie', ' MOVIE', 'film', ' FILM',
-        'OAD', 'OAV', 'OVA', ' OVA', '-ova',
-        'special', ' SP', ' sp',
-        'pilot', 'PILOT',
-    ];
-
-    /**
      * Extract the episode number from a filename.
      *
      * This method parses multiple episode patterns and returns the first
@@ -68,29 +55,6 @@ final class EpisodeExtractor
         }
 
         return null;
-    }
-
-    /**
-     * Detect if a filename likely represents a movie (not a series episode).
-     *
-     * Checks for movie/OVA/special patterns that indicate this is likely
-     * a film or special rather than a numbered episode of a series.
-     *
-     * @param string $filename The filename to check.
-     *
-     * @return bool True if movie/special pattern detected, false otherwise.
-     */
-    public function isMoviePattern(string $filename): bool
-    {
-        $lower = mb_strtolower($filename);
-
-        foreach (self::MOVIE_PATTERNS as $pattern) {
-            if (str_contains($lower, mb_strtolower($pattern))) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /**

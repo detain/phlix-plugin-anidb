@@ -243,7 +243,23 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
             ));
         }
 
+        // PG-157 (review anidb__srphp #8[m]): the map used to be stored RAW,
+        // so the declared `array{username: string, ...}` shape above was
+        // documentation-time only — a partial or wrongly-typed host delivery
+        // made the two `use_title_dump` reads (onEnable() and
+        // findAidByTitle()) and UdpClient::authenticate()'s credential
+        // subscripts emit undefined-key/type warnings once per lookup inside
+        // a resident worker, and a stringly "false" read TRUTHY. Normalize
+        // once at this single choke point: from here down every declared key
+        // exists with its plugin.json type. Absent/null credentials stay
+        // silent (the fresh-install shape — requireCredentials() remains the
+        // AUTH-time safety net, and construction must not hard-fail without
+        // them); a PRESENT wrong type is reported once, loudly, value-free
+        // (api_key is secret material), and falls back to its default.
         $this->settings = $settings;
+        $this->settings['username'] = self::normalizeCredential($settings, 'username');
+        $this->settings['api_key'] = self::normalizeCredential($settings, 'api_key');
+        $this->settings['use_title_dump'] = self::normalizeFlag($settings, 'use_title_dump', true);
         $this->settings['title_dump_url'] = $effectiveDumpUrl;
         $this->cacheDir = $this->resolveCacheDir($settings, $cacheDir);
         $this->udpClient = $udpClient ?? new SocketUdpClient(
@@ -256,6 +272,79 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         $this->episodeExtractor = $episodeExtractor ?? new EpisodeExtractor();
         $this->titleDumpManager = $titleDumpManager;
         $this->udpSession = $udpSession ?? new UdpClient($this->settings, $this->udpClient, $this->waiter);
+    }
+
+    /**
+     * Credential columns are strings by declaration (PG-157). Missing or
+     * explicitly-null values are the fresh-install shape and pass through
+     * silently as '' — UdpClient::requireCredentials() still refuses to AUTH
+     * with them, descriptively, at use time. A PRESENT but wrongly-typed
+     * value is a misconfiguration: named once via error_log (type only —
+     * api_key is secret material and never reaches the log) and collapsed to
+     * '', so no hot path can warn again on it.
+     *
+     * @param array<string, mixed> $settings Raw host-delivered map.
+     * @param string               $key      Declared credential key.
+     */
+    private static function normalizeCredential(array $settings, string $key): string
+    {
+        $value = $settings[$key] ?? null;
+
+        if ($value === null) {
+            return '';
+        }
+
+        if (is_string($value)) {
+            return $value;
+        }
+
+        error_log(sprintf(
+            'AnidbMetadataProvider: the %s setting must be a string; got %s — treated as unset.',
+            $key,
+            gettype($value),
+        ));
+
+        return '';
+    }
+
+    /**
+     * Declared boolean columns normalize to declared booleans (PG-157).
+     * Missing/null falls to the plugin.json default; native bools pass
+     * through; the JSON-ish spellings admin UIs persist ("0"/"1"/"true"/
+     * "false") coerce via filter_var; anything genuinely uncoercible is
+     * reported once and falls to the default. The old raw truthiness read a
+     * stored string "false" as TRUE — silently re-enabling the dump for the
+     * operator who had just disabled it.
+     *
+     * @param array<string, mixed> $settings Raw host-delivered map.
+     * @param string               $key      Declared boolean key.
+     * @param bool                 $default  plugin.json declared default.
+     */
+    private static function normalizeFlag(array $settings, string $key, bool $default): bool
+    {
+        $value = $settings[$key] ?? null;
+
+        if ($value === null) {
+            return $default;
+        }
+
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        $coerced = filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+
+        if ($coerced === null) {
+            error_log(sprintf(
+                'AnidbMetadataProvider: the %s setting must be a boolean; got %s — falling back to the declared default.',
+                $key,
+                gettype($value),
+            ));
+
+            return $default;
+        }
+
+        return $coerced;
     }
 
     /**
@@ -385,7 +474,8 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     }
 
     /**
-     * Fail loud on a relative cache path and canonicalize an existing one.
+     * Fail loud on a relative or world-writable cache path and canonicalize
+     * an existing one.
      *
      * A relative configured value would silently resolve against the worker's
      * current directory — dump data landing somewhere nobody administers —
@@ -394,12 +484,23 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      * where the index is written; not-yet-created paths pass through
      * unchanged (the indexer creates them lazily; realpath cannot pre-exist).
      *
+     * PG-153 (review anidb__secaudit #3[m]): plugin.json and README both
+     * decree the directory MUST NOT be world-writable — "the index is served
+     * from it" — and until now that sentence was enforced nowhere. In such a
+     * directory any local user can plant or swap title_index.json (or the
+     * in-flight marker, whose whole symlink analysis in the indexer assumes a
+     * non-hostile parent), which is exactly the activation-by-misconfiguration
+     * this choke point already refuses for relative paths — same rule, same
+     * loud construction-time failure. Group-writable stays lawful: the
+     * documented invariant is about the WORLD bit.
+     *
      * @param string $candidate Configured cache directory (non-empty).
      * @param string $source    Human name of the configuration source.
      *
      * @return string Absolute cache directory (canonicalized when it exists).
      *
-     * @throws \InvalidArgumentException If the candidate is not an absolute path.
+     * @throws \InvalidArgumentException If the candidate is not an absolute
+     *     path, or an existing one carries the other-write bit.
      */
     private function requireAbsoluteCacheDir(string $candidate, string $source): string
     {
@@ -412,7 +513,27 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
 
         $resolved = realpath($candidate);
 
-        return $resolved !== false ? $resolved : $candidate;
+        if ($resolved === false) {
+            return $candidate; // not created yet — nothing to stat, lazy mkdir owns it
+        }
+
+        $permissions = @fileperms($resolved);
+
+        if ($permissions !== false && ($permissions & 0o002) !== 0) {
+            // %o of a file's mode leads with the type digits (040777); the
+            // last four are the permission bits operators reason about, and
+            // a sticky bit renders in the recovered-mode hint's source value.
+            $mode = substr(sprintf('%o', $permissions), -4);
+
+            throw new \InvalidArgumentException(
+                'AnidbMetadataProvider: ' . $source . ' must not name a world-writable directory '
+                    . '(mode "' . $mode . '" — the title index is served from here, and any local user '
+                    . 'could plant or swap it; the plugin.json cache_dir contract forbids the '
+                    . 'other-write bit). Recover with `chmod o-w` on it; got "' . $candidate . '".',
+            );
+        }
+
+        return $resolved;
     }
 
     /**

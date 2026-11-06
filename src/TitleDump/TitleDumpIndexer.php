@@ -10,6 +10,7 @@ declare(strict_types=1);
 
 namespace Phlix\Anidb\TitleDump;
 
+use Phlix\Anidb\AnimeResponseParser;
 use RuntimeException;
 use Workerman\Http\Client;
 
@@ -35,6 +36,16 @@ final class TitleDumpIndexer
      * Default maximum age in seconds before re-download (24 hours).
      */
     public const MAX_AGE_SECONDS = 86400;
+
+    /**
+     * Ceiling for a legitimate AniDB AID on the dump path — the SAME bound the
+     * UDP parser enforces (review M-ANIDB-16), aliased to its single source of
+     * truth so the two ingestion paths can never drift apart (review
+     * anidb__srphp #6[m] / anidb__secaudit #9[m]: the dump's `(int)` cast
+     * accepted leading-digit garbage and saturating overflow into the shared
+     * index, the exact class the parser had already closed).
+     */
+    private const MAX_AID = AnimeResponseParser::MAX_AID;
 
     /**
      * Hard cap on the raw (gzipped) download body, in bytes.
@@ -1023,9 +1034,18 @@ final class TitleDumpIndexer
     /**
      * Check if the index file is stale (older than MAX_AGE_SECONDS).
      *
+     * PG-152 (review anidb__srphp #5[m]): the old formula
+     * `(time() - filemtime()) > MAX_AGE` read BOTH the unknown-age and the
+     * future-dated arm as "fresh forever" — a negative difference is never
+     * greater than 86400 — so a backwards NTP step, a restored snapshot, or
+     * the very `touch -d` the SM-0.3a runbook hands operators froze the daily
+     * refresh for the whole skew, and an unstatable file subtracted as 0.
+     * The marker path already treats those shapes as dead
+     * ({@see markerIsLive()}); isStale now mirrors that rule exactly.
+     *
      * @param string $indexFile Absolute path to the index file.
      *
-     * @return bool True if stale or does not exist.
+     * @return bool True if stale, unstatable, future-dated, or does not exist.
      */
     public function isStale(string $indexFile): bool
     {
@@ -1033,8 +1053,32 @@ final class TitleDumpIndexer
             return true;
         }
 
-        $mtime = filemtime($indexFile);
-        return (time() - $mtime) > self::MAX_AGE_SECONDS;
+        return !$this->indexMtimeIsFresh(filemtime($indexFile));
+    }
+
+    /**
+     * Freshness half of {@see isStale()}, over the raw stat result.
+     *
+     * Factored out so the unknown/future arms are testable without orchestrating
+     * a stat race, and so the shared law with {@see markerIsLive()} is visible
+     * in one place: an mtime we cannot read, or that reads ahead of the clock,
+     * proves nothing — and "proves nothing" must never mean "fresh".
+     *
+     * @param int|false $mtime Index mtime, or false when filemtime() failed.
+     */
+    private function indexMtimeIsFresh(int|false $mtime): bool
+    {
+        if ($mtime === false) {
+            return false; // unknown age → refresh (same rule as markerIsLive)
+        }
+
+        $now = time();
+
+        if ($mtime > $now) {
+            return false; // future-dated → the clock or the file moved → refresh
+        }
+
+        return ($now - $mtime) <= self::MAX_AGE_SECONDS;
     }
 
     /**
@@ -1052,6 +1096,7 @@ final class TitleDumpIndexer
     {
         $lines = explode("\n", trim($content));
         $grouped = [];
+        $refusedAidLines = 0;
 
         foreach ($lines as $line) {
             $line = trim($line);
@@ -1065,11 +1110,18 @@ final class TitleDumpIndexer
             }
 
             [$aidStr, $type, $lang, $title] = $parts;
-            $aid = (int) $aidStr;
 
-            if ($aid <= 0) {
+            // PG-155: the AID column is boundary-parsed exactly like the UDP
+            // path (M-ANIDB-16), and a violating LINE is refused — mirroring
+            // the dump's existing per-line skip law, while the whole-dump
+            // zero-entries refusal (review M2) still stands over it. The
+            // refusals are reported loudly below: dropping is not silent.
+            if (!self::aidColumnIsValid($aidStr)) {
+                ++$refusedAidLines;
                 continue;
             }
+
+            $aid = (int) $aidStr;
 
             if (!isset($grouped[$aid])) {
                 $grouped[$aid] = ['aid' => $aid, 'titles' => []];
@@ -1082,7 +1134,43 @@ final class TitleDumpIndexer
             ];
         }
 
+        if ($refusedAidLines > 0) {
+            // Count and ceiling only — never the violating line content, which
+            // is untrusted dump data (log-injection class).
+            error_log(sprintf(
+                'TitleDumpIndexer: REFUSING %d dump lines with malformed or out-of-range AID (ceiling %d)',
+                $refusedAidLines,
+                self::MAX_AID,
+            ));
+        }
+
         return array_values($grouped);
+    }
+
+    /**
+     * Whether a dump line's AID column names a legitimate AniDB AID.
+     *
+     * The old arm was `(int) $aidStr` plus a `<= 0` check, which let every
+     * garbage class through that M-ANIDB-16 refuses on the wire: "1abc" cast
+     * to 1, " 5" cast to 5, and a 20-digit column saturated to PHP_INT_MAX —
+     * each then indexed titles under an AID no real lookup can mean, in a
+     * file every worker shares. Digit-only, length-gated (because the int
+     * cast SATURATES rather than wraps past PHP_INT_MAX), and inside the
+     * inclusive ceiling, exactly the parser's shape.
+     */
+    private static function aidColumnIsValid(string $aidColumn): bool
+    {
+        if (!ctype_digit($aidColumn)) {
+            return false;
+        }
+
+        if (strlen($aidColumn) > strlen((string) self::MAX_AID)) {
+            return false;
+        }
+
+        $aid = (int) $aidColumn;
+
+        return $aid >= 1 && $aid <= self::MAX_AID;
     }
 
     /**
@@ -1122,7 +1210,29 @@ final class TitleDumpIndexer
     }
 
     /**
-     * Write the index array to the index file as JSON.
+     * Write the index array to the index file as JSON — atomically.
+     *
+     * PG-153 (reviews anidb__secaudit #1[m], anidb__srphp #3[m]). The old
+     * in-place `file_put_contents()` had three defects this shape closes:
+     *
+     *   1. TORN READS. The overwrite truncates then refills; a reader
+     *      (TitleDumpManager::ensureLoaded) racing the window could stat a
+     *      present file, open it mid-truncate, and decode a 0-byte or partial
+     *      body. A uniquely-named temp plus rename() swaps the whole
+     *      directory entry atomically — readers see old-or-new, never half.
+     *   2. SYMLINK FOLLOW. file_put_contents() resolves a symlink planted at
+     *      title_index.json (the marker-path analysis in
+     *      claimInFlightMarker() is the precedent) — every refresh became a
+     *      write through the attacker's link into an arbitrary target. The
+     *      path is now refused loudly when lstat sees a link.
+     *   3. READ-ONLY DESTINATION. An index left 0444 by an earlier
+     *      owner-mismatch blocked every later refresh in place; rename()
+     *      needs only directory-write, so that state self-heals.
+     *
+     * The rename yields a NEW inode with a NEW mtime, so the manager's
+     * reload-on-moved provenance law (ensureFresh/reloadIfDiskMoved, M5)
+     * keeps firing exactly as the in-place write did — that law is what the
+     * 2-byte incident made load-bearing, and it stays untouched.
      *
      * @param list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}> $index
      *
@@ -1138,7 +1248,7 @@ final class TitleDumpIndexer
             // check together, and the loser's "File exists" warning would be
             // pure log noise. If the path is STILL not a directory after the
             // attempt, creation genuinely failed — fail loud-early instead of
-            // cascading into a doomed file_put_contents warning.
+            // cascading into a doomed file write.
             @mkdir($dir, 0755, true);
             if (!is_dir($dir)) {
                 return false;
@@ -1157,9 +1267,46 @@ final class TitleDumpIndexer
             return false;
         }
 
-        $result = file_put_contents($indexFile, $json);
+        // Defect 2: refuse a planted symlink BEFORE anything is written. The
+        // notice is once-per-attempt by nature (only a genuine refresh
+        // reaches here) and names only the basename, per the M-ANIDB-19
+        // path-privacy rule.
+        if (is_link($indexFile)) {
+            error_log(sprintf(
+                'TitleDumpIndexer: REFUSING write — the index path "%s" is a symbolic link and writing through it '
+                . 'would follow the redirect. Remove the link to resume title-dump updates. '
+                . '(Set PHLIX_ANIDB_DEBUG=1 to log full paths.)',
+                self::pathForLog($indexFile),
+            ));
 
-        return $result !== false;
+            return false;
+        }
+
+        // Unique name: two workers in the same cache dir (the marker's TTL
+        // makes that reachable after a crash) must never share a temp file.
+        $tempFile = $dir . '/title_index.json.' . bin2hex(random_bytes(8)) . '.tmp';
+
+        if (@file_put_contents($tempFile, $json) === false) {
+            error_log('TitleDumpIndexer: REFUSING write — could not create the temporary index file in the cache directory.');
+
+            return false;
+        }
+
+        // Deterministic final mode (0666 & ~umask could leave the index
+        // group- or world-writable on some hosts; the content is served
+        // world-readable by design but must never be world-MUTABLE).
+        @chmod($tempFile, 0644);
+
+        if (!@rename($tempFile, $indexFile)) {
+            // The swap failed (directory raced into read-only, disk full at
+            // the last step) — do not litter the cache dir for the retries.
+            @unlink($tempFile);
+            error_log('TitleDumpIndexer: REFUSING write — the temporary index could not be renamed into place.');
+
+            return false;
+        }
+
+        return true;
     }
 
     /**

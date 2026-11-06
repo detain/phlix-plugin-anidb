@@ -11,7 +11,12 @@
  * non-empty strings naming an absolute path, and an existing directory is
  * canonicalized through realpath() so a symlinked configured path cannot
  * quietly redirect where dump data lands. A world-writable cache directory
- * is prohibited by the manifest/README contract (operator-facing docs).
+ * is prohibited by the manifest/README contract — and since PG-153 that
+ * documented rule is ENFORCED at the same choke point: an existing
+ * configured directory carrying the other-write bit is refused at
+ * construction, because the index is served from it and any local user
+ * could plant or swap it (the same activation-by-misconfiguration class
+ * as a relative path).
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT
@@ -135,5 +140,94 @@ final class CacheDirValidationTest extends TestCase
         ], null, null, null, null, null, null, null, 'rel-explicit');
 
         $this->assertSame('rel-explicit', $this->cacheDirOf($provider));
+    }
+
+    /**
+     * PG-153 (review anidb__secaudit #3[m]): plugin.json and README both
+     * decree the cache dir MUST NOT be world-writable — every existing pin
+     * enforced everything EXCEPT that sentence. An existing configured
+     * directory carrying the other-write bit is now refused at the same
+     * choke point, naming the mode and the remedy.
+     */
+    public function test_world_writable_existing_cache_dir_setting_is_rejected(): void
+    {
+        $dir = sys_get_temp_dir() . '/phlix-anidb-ww-' . bin2hex(random_bytes(4));
+        $this->assertTrue(mkdir($dir, 0o777, true));
+        $this->assertTrue(chmod($dir, 0o777)); // mkdir honors the umask
+
+        try {
+            $this->expectException(\InvalidArgumentException::class);
+            $this->expectExceptionMessageMatches('/world-writable/');
+
+            $this->provider(['cache_dir' => $dir]);
+        } finally {
+            @rmdir($dir);
+        }
+    }
+
+    public function test_sticky_world_writable_existing_cache_dir_setting_is_rejected(): void
+    {
+        // 1777 (a /tmp-style shared scratch): sticky protects files from
+        // OTHER owners' deletes, but the index's own freshness window, a
+        // planted symlink at the exact index name, and an empty-dir race are
+        // all open to any local user. The documented rule is flat — the
+        // other-write bit refuses regardless of sticky.
+        $dir = sys_get_temp_dir() . '/phlix-anidb-sww-' . bin2hex(random_bytes(4));
+        $this->assertTrue(mkdir($dir, 0o777, true));
+        $this->assertTrue(chmod($dir, 0o1777));
+
+        try {
+            $this->expectException(\InvalidArgumentException::class);
+
+            $this->provider(['cache_dir' => $dir]);
+        } finally {
+            @rmdir($dir);
+        }
+    }
+
+    public function test_world_writable_cache_dir_environment_is_rejected(): void
+    {
+        // The env twin is the same operator-facing surface — same rule.
+        $dir = sys_get_temp_dir() . '/phlix-anidb-ww-env-' . bin2hex(random_bytes(4));
+        $this->assertTrue(mkdir($dir, 0o777, true));
+        $this->assertTrue(chmod($dir, 0o777)); // mkdir honors the umask
+
+        try {
+            putenv('PHLIX_ANIDB_CACHE_DIR=' . $dir);
+
+            $this->expectException(\InvalidArgumentException::class);
+            $this->expectExceptionMessageMatches('/PHLIX_ANIDB_CACHE_DIR/');
+
+            $this->provider([]);
+        } finally {
+            @rmdir($dir);
+        }
+    }
+
+    public function test_group_writable_but_not_world_writable_cache_dir_is_allowed(): void
+    {
+        // The documented invariant is about the WORLD bit. A shared service
+        // group writing the cache dir (0775) stays lawful — refusing it
+        // would break a legitimate deployment the docs never forbade.
+        $dir = sys_get_temp_dir() . '/phlix-anidb-grw-' . bin2hex(random_bytes(4));
+        $this->assertTrue(mkdir($dir, 0o775, true));
+        $this->assertTrue(chmod($dir, 0o775)); // mkdir honors the umask
+
+        try {
+            $this->assertSame(realpath($dir), $this->cacheDirOf($this->provider(['cache_dir' => $dir])));
+        } finally {
+            @rmdir($dir);
+        }
+    }
+
+    public function test_not_yet_existing_world_writable_parent_is_not_refused(): void
+    {
+        // realpath cannot check a directory that does not exist yet (the
+        // indexer creates it lazily); the check applies to the configured
+        // directory ITSELF when it exists, mirroring the canonicalization
+        // rule exactly — a nonexistent path passes through unchanged.
+        $wanted = sys_get_temp_dir() . '/phlix-anidb-fresh-' . bin2hex(random_bytes(4));
+
+        $this->assertSame($wanted, $this->cacheDirOf($this->provider(['cache_dir' => $wanted])));
     }
 }

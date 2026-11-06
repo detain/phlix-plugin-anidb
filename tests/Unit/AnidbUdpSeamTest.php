@@ -95,10 +95,10 @@ final class AnidbUdpSeamTest extends TestCase
     public static function authFailureProvider(): array
     {
         return [
-            '500 invalid credentials' => ['500 LOGIN FAILED', 'Invalid username or API password'],
-            '503 outdated client'     => ['503 CLIENT VERSION OUTDATED', 'Client version outdated'],
-            '504 client banned'       => ['504 CLIENT BANNED - flooding', 'Client banned'],
-            '555 banned'              => ['555 BANNED - too many failed logins', 'Banned'],
+            '500 invalid credentials' => ['500 LOGIN FAILED', 'invalid username or API password'],
+            '503 outdated client'     => ['503 CLIENT VERSION OUTDATED', 'client version outdated'],
+            '504 client banned'       => ['504 CLIENT BANNED - flooding', 'client version banned'],
+            '555 banned'              => ['555 BANNED - too many failed logins', 'temporarily banned'],
             'unknown code raw'        => ['600 INTERNAL SERVER ERROR', 'AniDB AUTH failed: 600 INTERNAL SERVER ERROR'],
         ];
     }
@@ -450,7 +450,7 @@ final class AnidbUdpSeamTest extends TestCase
 
         $exception = $client->parseAuthFailure('500 LOGIN FAILED');
         $this->assertInstanceOf(\RuntimeException::class, $exception);
-        $this->assertStringContainsString('Invalid username', $exception->getMessage());
+        $this->assertStringContainsString('invalid username', $exception->getMessage());
     }
 
     public function test_parse_auth_failure_503(): void
@@ -462,7 +462,7 @@ final class AnidbUdpSeamTest extends TestCase
 
         $exception = $client->parseAuthFailure('503 CLIENT VERSION OUTDATED');
         $this->assertInstanceOf(\RuntimeException::class, $exception);
-        $this->assertStringContainsString('Client version outdated', $exception->getMessage());
+        $this->assertStringContainsString('client version outdated', $exception->getMessage());
     }
 
     public function test_parse_auth_failure_504(): void
@@ -474,7 +474,7 @@ final class AnidbUdpSeamTest extends TestCase
 
         $exception = $client->parseAuthFailure('504 CLIENT BANNED - flooding');
         $this->assertInstanceOf(\RuntimeException::class, $exception);
-        $this->assertStringContainsString('Client banned', $exception->getMessage());
+        $this->assertStringContainsString('client version banned', $exception->getMessage());
     }
 
     public function test_parse_auth_failure_555(): void
@@ -486,7 +486,7 @@ final class AnidbUdpSeamTest extends TestCase
 
         $exception = $client->parseAuthFailure('555 BANNED - too many failed logins');
         $this->assertInstanceOf(\RuntimeException::class, $exception);
-        $this->assertStringContainsString('Banned', $exception->getMessage());
+        $this->assertStringContainsString('temporarily banned', $exception->getMessage());
     }
 
     public function test_parse_auth_failure_unknown(): void

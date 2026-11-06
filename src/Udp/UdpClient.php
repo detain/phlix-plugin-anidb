@@ -16,7 +16,9 @@ namespace Phlix\Anidb\Udp;
  * Encapsulates the AniDB UDP protocol lifecycle:
  * - Authentication (AUTH command, session key management)
  * - Command execution with automatic re-auth on 506 SESSION EXPIRED
- * - Flood protection (4-second minimum between commands)
+ * - Flood protection (minimum interval between ANY packets — see
+ *   {@see self::FLOOD_PROTECTION_INTERVAL_SEC}; the server counts PINGs and
+ *   AUTH retries toward the same rate limit as commands)
  * - Keep-alive pings to maintain the session
  *
  * This class is the "high-level" UDP client that sits above the raw
@@ -33,7 +35,12 @@ namespace Phlix\Anidb\Udp;
 final class UdpClient
 {
     /**
-     * Minimum interval between UDP commands in seconds (flood protection).
+     * Minimum interval between UDP packets in seconds (flood protection).
+     *
+     * AniDB forbids more than one packet per interval and counts every
+     * datagram from the client — commands, PING, AUTH and LOGOUT alike.
+     * The gate runs inside {@see self::udpSend()}, the single point all
+     * packets leave through, so no sender path can bypass it.
      */
     private const FLOOD_PROTECTION_INTERVAL_SEC = 4.0;
 
@@ -186,10 +193,10 @@ final class UdpClient
         // Attach session key
         $fullCommand = $command . '&s=' . $this->sessionKey;
 
-        // Flood protection: enforce minimum interval between sends
-        $this->enforceFloodProtection();
-
-        // Keep session alive if needed
+        // Keep session alive if needed. Both the PING and the command below
+        // pay the flood interval inside udpSend() — every packet, no bypass
+        // (an enforce-before-ping call here used to gate only the pair's
+        // first packet and let the command follow its PING back-to-back).
         if ($this->needsKeepAlive()) {
             $this->ping();
         }
@@ -224,8 +231,11 @@ final class UdpClient
      *
      * AUTH is special: it has no session key (the server assigns one in the
      * response), so we bypass sendCommand() which would incorrectly append
-     * '&s=' to a null sessionKey. AUTH also bypasses flood protection since
-     * it's the first packet sent; the server enforces the rate limit.
+     * '&s=' to a null sessionKey. The flood interval is NOT bypassed: AUTH
+     * passes the same gate inside udpSend() as every other packet. At boot
+     * it is the first send and the gate opens without waiting; on a 506
+     * re-auth the AUTH datagram waits its turn behind the command that just
+     * expired the session.
      *
      * Posture note: the AniDB UDP API has no encrypted transport — the
      * username and API password travel in a cleartext datagram. This is
@@ -344,6 +354,13 @@ final class UdpClient
     /**
      * Parse an AUTH failure response and return an appropriate exception.
      *
+     * Code semantics follow the AniDB UDP API definition: 500 LOGIN FAILED,
+     * 503 CLIENT VERSION OUTDATED, 504 CLIENT BANNED (that version of the
+     * client software is banned — NOT the user account), 555 BANNED (a
+     * temporary ban; the code exists to tell developers what they are doing
+     * wrong — typically API misuse such as flooding). Labels below keep the
+     * two bans distinguishable at a glance in logs.
+     *
      * @param string $response Raw response string.
      *
      * @return \RuntimeException
@@ -351,16 +368,16 @@ final class UdpClient
     public function parseAuthFailure(string $response): \RuntimeException
     {
         if (str_starts_with($response, '500')) {
-            return new \RuntimeException('AniDB AUTH failed: Invalid username or API password');
+            return new \RuntimeException('AniDB AUTH failed: invalid username or API password');
         }
         if (str_starts_with($response, '503')) {
-            return new \RuntimeException('AniDB AUTH failed: Client version outdated');
+            return new \RuntimeException('AniDB AUTH failed: client version outdated');
         }
         if (str_starts_with($response, '504')) {
-            return new \RuntimeException('AniDB AUTH failed: Client banned — ' . substr($response, 4));
+            return new \RuntimeException('AniDB AUTH failed: client version banned — ' . substr($response, 4));
         }
         if (str_starts_with($response, '555')) {
-            return new \RuntimeException('AniDB AUTH failed: Banned — ' . substr($response, 4));
+            return new \RuntimeException('AniDB AUTH failed: temporarily banned — ' . substr($response, 4));
         }
 
         return new \RuntimeException('AniDB AUTH failed: ' . self::scrubAuthFailureBody($response));
@@ -389,6 +406,11 @@ final class UdpClient
     /**
      * Low-level UDP send/receive via the transport seam.
      *
+     * The single choke point every packet leaves through — the flood gate
+     * runs here so commands, PING, AUTH and LOGOUT all pay the minimum
+     * interval. The boot AUTH is still immediate: with no previous send
+     * (lastSendTimestamp 0.0) the gate has nothing to space behind.
+     *
      * @param string $data Command string to send.
      *
      * @return string|null Response string or null on timeout or invalid origin.
@@ -397,7 +419,7 @@ final class UdpClient
      */
     private function udpSend(string $data): ?string
     {
-        $this->lastSendTimestamp = microtime(true);
+        $this->enforceFloodProtection();
 
         $response = $this->transport->send($data);
 
@@ -455,7 +477,12 @@ final class UdpClient
     }
 
     /**
-     * Enforce the 4-second minimum between UDP commands.
+     * Enforce the minimum interval between UDP packets.
+     *
+     * Called by {@see self::udpSend()} before EVERY datagram leaves, so the
+     * gate covers commands, PING, AUTH and LOGOUT alike — AniDB counts them
+     * all toward one per-client rate limit and exceeding it drops further
+     * packets without feedback.
      *
      * Uses the injected {@see WaiterInterface} instead of blocking `usleep()`,
      * allowing non-blocking implementations to yield to the event loop.
@@ -472,6 +499,8 @@ final class UdpClient
             $this->waiter->wait($waitTime);
         }
 
+        // Stamp AFTER the (possible) wait so the next gate measures from the
+        // moment this packet is about to leave, not from before its wait.
         $this->lastSendTimestamp = microtime(true);
     }
 

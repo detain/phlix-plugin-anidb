@@ -17,6 +17,40 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- The flood interval now gates EVERY packet (review anidb__srphp #1). The
+  keep-alive leg sent its PING and the command back-to-back — the gate ran
+  once before the ping and refreshed its stamp there — and the 506 re-auth
+  AUTH left with no interval check at all behind the command that had just
+  expired the session: two datagrams milliseconds apart against AniDB's
+  one-packet-per-four-seconds policy, risking a rate-limit ban of the shared
+  session for exactly the two senders the waiter seam existed to discipline.
+  The gate moved into `udpSend()` — the single choke point every datagram
+  leaves through — so commands, PING, AUTH and LOGOUT all pay the interval;
+  the boot AUTH still leaves immediately because there is no previous send
+  to space behind it. The `authenticate()` docblock's "first packet" bypass
+  justification (true at boot, false on re-auth) was rewritten to current
+  truth. Three new timeline tests pin the invariant through a transport fake
+  recording send/wait events with no real sleeps: the keep-alive and re-auth
+  legs measured red on the parent, the boot characterization is green on
+  both sides by design.
+
+- Copy-currency batch (review anidb__copywriter #6, #7, #9–#11): the README
+  "Data Returned" sample showed every fixed key except the always-set
+  `description_fetch_failed` flag — the one that distinguishes "no synopsis
+  exists" from "synopsis fetch failed" — and the row was added; the
+  AGENTS.md/CLAUDE.md settings list gained the omitted `cache_dir`, the
+  setting whose misconfiguration produces the loudest operator errors; the
+  AUTH-failure messages unified on lowercase after the colon (matching the
+  rest of the message family) and the two near-colliding ban labels were
+  disambiguated against the AniDB UDP API definition — 504 is "client
+  version banned" (that client software is banned, not the user account),
+  555 is "temporarily banned" (the server's developer-aid message for a
+  temporary ban, typically from API misuse such as flooding) — with their
+  test pins rotated from a measured red in the same commit; the manifest's
+  "daily anime titles dump" became "daily anime title dump" (one adjective
+  form across the surfaces); and the fork instruction now says "set
+  `version` to `0.1.0` for your fork" — "bump" describes the opposite
+  direction for what is a reset.
 - Copy-currency + docs-truth batch (wave 3 L9; review anidb__copywriter #1–#5,
   anidb__srphp #6[i]): the README install URL pointed at `main/` — the default
   branch is `master` and the pasted URL 404s, so install step 3 was inert; the

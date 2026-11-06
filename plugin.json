@@ -31,7 +31,7 @@
             "default": true,
             "tier": "advanced",
             "label": "Use AniDB Title Dump",
-            "description": "Download the daily anime titles dump for fast, offline search. Recommended — it greatly reduces rate-limited API calls."
+            "description": "Download the daily anime title dump for fast, offline search. Recommended — it greatly reduces rate-limited API calls."
         },
         "title_dump_url": {
             "type": "string",

@@ -142,6 +142,7 @@ See the [AniDB UDP API docs](https://wiki.anidb.net/UDP_API_Definition) for full
     'source'        => null,                     // Source material, when known
     'is_movie'      => false,                    // Derived from type / filename pattern
     'synonyms'      => ['Crest of the Stars'],   // True synonyms from the ANIME response (field 11); short_names (field 10) also feed 'titles'
+    'description_fetch_failed' => false,         // true when the synopsis (ANIMEDESC) fetch failed — distinguishes "no synopsis exists" from "synopsis fetch failed"
     'episode_number' => 1,                       // Parsed from the filename; key is ABSENT (not null) when the filename yields none
 ]
 ```
@@ -151,7 +152,7 @@ See the [AniDB UDP API docs](https://wiki.anidb.net/UDP_API_Definition) for full
 This plugin is based on [`phlix-plugin-example`](https://github.com/detain/phlix-plugin-example). To create your own metadata provider:
 
 1. Fork or copy this repository.
-2. Edit `plugin.json` — pick a new `name` (must start with `phlix-plugin-`), bump `version` to `0.1.0`, change `entry` to your FQCN.
+2. Edit `plugin.json` — pick a new `name` (must start with `phlix-plugin-`), set `version` to `0.1.0` for your fork, change `entry` to your FQCN.
 3. Edit `composer.json` — rename the package, update PSR-4 autoload prefix.
 4. Replace `src/AnidbMetadataProvider.php` with your own implementation.
 5. Run tests: `composer install && vendor/bin/phpunit`.

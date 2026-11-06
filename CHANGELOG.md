@@ -27,7 +27,16 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
     for the duration of any clock skew, the exact marker-path failure
     `markerIsLive()` already refuses. Both arms now mean STALE, mirroring
     the marker rule; the freshness half moved into a named predicate so the
-    boundary and the arms are testable without a stat race.
+    boundary and the arms are testable without a stat race. The decision
+    now reads through `clearstatcache(true, $indexFile)`: PHP does not
+    invalidate the stat cache on `touch()`, so a cached mtime could mask
+    both new arms with an outcome that depends on which earlier code path
+    stat'd the file (surfaced as CI-green/local-red order-dependence on the
+    first push of this batch). Consequently the M5 reload-on-moved fixture
+    no longer fakes a forward move with a future `touch` — an index dated
+    ahead of the clock is stale by the very law above, so the test drives
+    the same reload law with two past-dated stamps (hour-old → ten-seconds-
+    old), deterministic on every runner.
   - `writeIndex()` switched from an in-place `file_put_contents()` to a
     uniquely-named temp file plus `rename()`: readers can no longer decode
     a torn 0-byte body mid-truncate, a planted symlink at the index path is

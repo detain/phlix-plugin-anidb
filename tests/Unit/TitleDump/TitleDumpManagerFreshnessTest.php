@@ -145,6 +145,13 @@ final class TitleDumpManagerFreshnessTest extends TestCase
         $indexFile = $this->writeIndexJson([
             ['aid' => 1, 'titles' => [['title' => 'First Content', 'type' => 'main', 'lang' => 'en']]],
         ]);
+        // Past-dated by an hour: fresh under the TTL (no download expected
+        // below), yet leaving headroom for the rewrite to move the mtime
+        // FORWARD without going future. A future-dated index is stale by the
+        // clock-skew law (isStale/indexMtimeIsFresh, review anidb__srphp #4),
+        // so the old `touch(time() + 10)` trick now legitimately provokes a
+        // refresh — reload-on-moved must be driven by a REAL forward move.
+        touch($indexFile, time() - 3600);
 
         $manager = $this->manager(function (): void {
             // Never invoked: the file starts fresh, so no download is expected.
@@ -158,7 +165,7 @@ final class TitleDumpManagerFreshnessTest extends TestCase
         $this->writeIndexJson([
             ['aid' => 7, 'titles' => [['title' => 'Async Arrival', 'type' => 'main', 'lang' => 'en']]],
         ], $indexFile);
-        touch($indexFile, time() + 10);
+        touch($indexFile, time() - 10);
         $this->resetFreshnessThrottle($manager);
 
         $this->assertSame(7, $manager->search('Async Arrival'));

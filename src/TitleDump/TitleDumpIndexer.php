@@ -1049,6 +1049,14 @@ final class TitleDumpIndexer
      */
     public function isStale(string $indexFile): bool
     {
+        // Decide on CURRENT disk truth, never a stat cached earlier in the
+        // process: PHP's plain-files stat cache is not invalidated by touch(),
+        // so a cached mtime here would silently mask the future-dated and
+        // absent-age arms below — with the masking outcome depending on which
+        // earlier code path stat'd the file first (measured: the same suite is
+        // green on one runner and red on another purely on that ordering).
+        clearstatcache(true, $indexFile);
+
         if (!is_file($indexFile)) {
             return true;
         }

@@ -17,6 +17,42 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- Rejected UDP reply origins name themselves, and the trusted-origin
+  allowlist refreshes itself (review anidb__srphp #9[i]; program w15 L4,
+  all tests measured red on the parent first — departed-lane evidence
+  `/tmp/opencode/w15L4-red-parent.txt`, takeover re-reproduction
+  `/tmp/opencode/w15l4v2-red-parent.txt`, forensics
+  `.reviews/2026-11-08/FIX-anidb-w15L4-takeover.md`):
+  - `resolveValidOriginHosts()` memoized its A-record set for the whole
+    process lifetime, so an AniDB DNS rotation turned every genuine reply
+    into a silent timeout inside a resident worker — with no log line
+    naming the cause. The memo now expires after
+    `ORIGIN_HOSTS_TTL_SEC` (1 hour) and re-resolves on the next
+    validation, so a rotated set lands and the departed IP drops out; a
+    failed re-resolve keeps the unchanged hostname-only posture. A
+    constructor-injected list stays the trusted set: verbatim, never
+    expired, never resolved.
+  - A rejected reply origin now also writes one `error_log` line naming
+    `host:port` (never the payload), throttled to one line per
+    `ORIGIN_REJECT_LOG_INTERVAL_SEC` (5 minutes) so a rotation or
+    spoofing storm cannot flood the log. The caller-visible outcome is
+    unchanged: null reply, same retry law.
+- Every echo of a configured `title_dump_url` routes through one scrubber
+  (review anidb__secaudit #2[m]; program w15 L4):
+  `TitleDumpIndexer::urlForLog()` redacts userinfo to `***` while keeping
+  host/path/query/fragment visible, withholds scheme-less-`@` and
+  unparseable inputs entirely as `UNLOGGABLE_URL`, and passes
+  credential-free URLs byte-identically. The two full-URL echoes — the
+  provider constructor's migration log and `httpClientConfig()`'s
+  no-host `RuntimeException`, the latter under a false "credential-free
+  by contract" claim — now go through it. The scheme guard's refusal and
+  the cleartext host-only warning were already honest and stay untouched.
+- The `isStale()` `clearstatcache` leg gained its demanded differential
+  pin (review w14 L7 follow-up, `.reviews/2026-11-07/REVIEW-w14L7anidb.md`
+  [Minor]): seed the stat cache with `is_file()` before a future-dated
+  `touch()`, then assert `isStale()` decides on disk truth. Deleting the
+  leg — which survived six suite runs at the time — now reddens exactly
+  that one test (mutation-proven).
 - Title-dump ingestion and settings hardening (reviews anidb__srphp #3, #4,
   #5, #6, #8; anidb__secaudit #1, #3 — program w14 L7, six findings, all
   measured red on the parent first, register evidence

@@ -235,11 +235,15 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
             && trim($configuredDumpUrl) !== ''
             && $configuredDumpUrl !== $effectiveDumpUrl
         ) {
+            // PG-159: both sides render through the single URL scrubber —
+            // migration preserves userinfo across the http->https swap, so
+            // the old verbatim echo landed an operator-embedded credential
+            // pair in the shared error log.
             error_log(sprintf(
                 'AnidbMetadataProvider: migrated stored title_dump_url "%s" -> "%s" '
                 . '(AniDB answers plain http with 403)',
-                $configuredDumpUrl,
-                $effectiveDumpUrl,
+                TitleDumpIndexer::urlForLog($configuredDumpUrl),
+                TitleDumpIndexer::urlForLog($effectiveDumpUrl),
             ));
         }
 

@@ -172,6 +172,41 @@ final class TitleDumpManagerFreshnessTest extends TestCase
         $this->assertNull($manager->search('First Content'));
     }
 
+    /**
+     * w15L4 add-on (review REVIEW-w14L7anidb.md Minor): a DETERMINISTIC pin
+     * for the clearstatcache cure leg in isStale() — the leg M1-strip left
+     * unpinned (the old suite only caught it via a historical CI accident).
+     *
+     * The recipe is the reviewer's own: seed the plain-file stat cache with a
+     * pre-mutation stat, mutate the file's mtime out from under the process
+     * (exactly what a sibling worker's write or the operator `touch -d` from
+     * the SM-0.3a runbook does to a resident worker), then require isStale()
+     * to decide from CURRENT disk truth. With the leg stripped, is_file()
+     * and filemtime() inside isStale() serve the cached pre-touch stat and
+     * the future-dated index reads fresh — this test goes red.
+     */
+    public function test_is_stale_decides_on_disk_truth_over_a_seeded_stat_cache(): void
+    {
+        $index = $this->writeIndexJson([
+            ['aid' => 1, 'titles' => [['title' => 'Cached Show', 'type' => 'main', 'lang' => 'en']]],
+        ]);
+
+        // Seed the stat cache with the pre-mutation mtime.
+        $this->assertTrue(is_file($index));
+
+        // Mutate the index behind the process's back: future-dated mtime is
+        // the dead-age arm of the freshness law (PG-152) — disk truth says
+        // stale, the seeded cache says fresh.
+        touch($index, time() + 3600);
+
+        $indexer = new TitleDumpIndexer($this->tmpDir, 'https://anidb.invalid/api/anime-titles.dat.gz');
+
+        $this->assertTrue(
+            $indexer->isStale($index),
+            'isStale() answered from the seeded stat cache — the clearstatcache(true, path) leg is gone'
+        );
+    }
+
     // -------------------------------------------------------------------------
 
     /**

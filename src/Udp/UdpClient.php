@@ -65,6 +65,29 @@ final class UdpClient
     private const AUTH_FAILURE_BODY_MAX = 120;
 
     /**
+     * TTL for the lazily-resolved reply-origin allowlist, in seconds (1 hour).
+     *
+     * PG-158 (review anidb__srphp #9[i]): AniDB rotates the A records behind
+     * api.anidb.net, and the old memo lived for the process lifetime — in a
+     * resident Workerman worker that never restarts, every genuine reply
+     * became a silent origin-validation failure once the addresses turned
+     * over, and the provider degraded to permanent timeouts naming no cause.
+     * A memo that expires hourly re-resolves on the next validation after a
+     * rotation. Lists explicitly injected through the constructor are the
+     * trusted seam, not a DNS memo, and never expire.
+     */
+    private const ORIGIN_HOSTS_TTL_SEC = 3600;
+
+    /**
+     * Minimum interval between rejected-origin log lines, in seconds.
+     *
+     * The flood gate caps packets at one per 4 s, so an unthrottled rejection
+     * line could storm the shared error log at fifteen lines a minute during
+     * a rotation; one named line every 5 minutes is plenty to diagnose it.
+     */
+    private const ORIGIN_REJECT_LOG_INTERVAL_SEC = 300;
+
+    /**
      * Setting key → human-style field name used in the credential-guard
      * message, so an operator can map it onto the settings form (whose
      * labels are "AniDB Username" and "AniDB UDP API Key") instead of
@@ -115,9 +138,38 @@ final class UdpClient
      * compared like-for-like. Injectable so tests can assert origin validation
      * against a realistic dotted-quad without live DNS.
      *
+     * PG-158: lazily-resolved lists are a memo governed by
+     * {@see ORIGIN_HOSTS_TTL_SEC}; a constructor-injected list is the trusted
+     * set and never expires (see {@see self::$originHostsFromMemo}).
+     *
      * @var list<string>|null
      */
     private ?array $validOriginHosts;
+
+    /**
+     * Whether {@see self::$validOriginHosts} is the lazy DNS memo (true) or
+     * the constructor-injected trusted set (false).
+     */
+    private bool $originHostsFromMemo = false;
+
+    /**
+     * time() at which the lazy origin memo was last resolved.
+     */
+    private int $originHostsResolvedAt = 0;
+
+    /**
+     * time() at which a rejected reply origin was last named in the log.
+     *
+     * Zero at boot so the first rejection logs immediately.
+     */
+    private int $lastOriginRejectLogAt = 0;
+
+    /**
+     * Name-resolution seam: hostname → its A-record list.
+     *
+     * @var callable(string): (list<string>|false|null)
+     */
+    private $originHostsResolver;
 
     /**
      * @param array{username: string, api_key: string} $settings AniDB credentials.
@@ -128,13 +180,20 @@ final class UdpClient
      * @param list<string>|null                        $validOriginHosts Explicit set of acceptable
      *                                                             reply-origin hosts (IPs and/or the
      *                                                             hostname). Defaults to null → resolved
-     *                                                             from API_HOST via gethostbynamel().
+     *                                                             from API_HOST (TTL-memoized, see
+     *                                                             {@see ORIGIN_HOSTS_TTL_SEC}).
+     * @param callable(string):(list<string>|false|null)|null $originHostsResolver
+     *                                                             Seam for the lazy A-record lookup.
+     *                                                             Defaults to null → @gethostbynamel().
+     *                                                             Injectable so TTL tests can count
+     *                                                             resolutions without live DNS.
      */
     public function __construct(
         array $settings,
         ?UdpClientInterface $transport = null,
         ?WaiterInterface $waiter = null,
         ?array $validOriginHosts = null,
+        ?callable $originHostsResolver = null,
     ) {
         $this->settings = $settings;
         $this->transport = $transport ?? new SocketUdpClient(
@@ -143,6 +202,7 @@ final class UdpClient
         );
         $this->waiter = $waiter ?? new ProductionWaiter();
         $this->validOriginHosts = $validOriginHosts;
+        $this->originHostsResolver = $originHostsResolver ?? self::resolveAnidbHosts(...);
     }
 
     /**
@@ -426,8 +486,15 @@ final class UdpClient
         // S2/S3 origin validation: reject replies not from api.anidb.net:9000.
         // This prevents forged responses from being accepted.
         if ($response !== null) {
-            if (!$this->isValidReplyOrigin($this->transport->lastReplyHost(), $this->transport->lastReplyPort())) {
-                return null; // Spoofed or misrouted reply — signal caller to retry
+            $replyHost = $this->transport->lastReplyHost();
+            $replyPort = $this->transport->lastReplyPort();
+
+            if (!$this->isValidReplyOrigin($replyHost, $replyPort)) {
+                // PG-158: name the rejected origin (throttled) so a DNS
+                // rotation is diagnosable — then signal the caller to retry.
+                $this->logRejectedOrigin($replyHost, $replyPort);
+
+                return null; // Spoofed or misrouted reply
             }
         }
 
@@ -457,23 +524,79 @@ final class UdpClient
     }
 
     /**
-     * Resolve (and memoize) the set of acceptable reply-origin hosts.
+     * Resolve the set of acceptable reply-origin hosts — TTL-memoized.
+     *
+     * A lazily-resolved memo older than {@see ORIGIN_HOSTS_TTL_SEC} is
+     * re-resolved on the next validation, so an AniDB A-record rotation heals
+     * within the TTL instead of silently dropping every genuine reply for the
+     * process lifetime (PG-158). A constructor-injected list is the trusted
+     * set — returned verbatim, never expired, never resolved.
      *
      * @return list<string> Hostname + its resolved A-record IPs.
      */
     private function resolveValidOriginHosts(): array
     {
         if ($this->validOriginHosts !== null) {
-            return $this->validOriginHosts;
+            if (!$this->originHostsFromMemo) {
+                return $this->validOriginHosts;
+            }
+
+            if (time() - $this->originHostsResolvedAt < self::ORIGIN_HOSTS_TTL_SEC) {
+                return $this->validOriginHosts;
+            }
         }
 
         $hosts = [self::API_HOST];
-        $ips = @gethostbynamel(self::API_HOST);
-        if (is_array($ips)) {
-            $hosts = array_merge($hosts, $ips);
+        $resolved = ($this->originHostsResolver)(self::API_HOST);
+        if (is_array($resolved)) {
+            $hosts = array_merge($hosts, $resolved);
         }
 
-        return $this->validOriginHosts = array_values(array_unique($hosts));
+        $this->validOriginHosts = array_values(array_unique($hosts));
+        $this->originHostsFromMemo = true;
+        $this->originHostsResolvedAt = time();
+
+        return $this->validOriginHosts;
+    }
+
+    /**
+     * Default name-resolution seam: the A records of the API host.
+     *
+     * @return list<string>|false False when DNS resolution fails — the caller
+     *                            treats it as "hostname only" (unchanged posture).
+     */
+    private static function resolveAnidbHosts(string $host): array|false
+    {
+        return @gethostbynamel($host);
+    }
+
+    /**
+     * Log a rejected reply origin, at most once per throttle window.
+     *
+     * PG-158 (review anidb__srphp #9[i]): the rejection used to be invisible —
+     * udpSend() returned null and AUTH surfaced the generic "no response
+     * (timeout or network failure)", leaving a permanent-timeout provider no
+     * line to name the cause. The message carries only the origin peer (as
+     * reported by recvfrom(), truncated to a bounded length so no reply
+     * payload can hide inside it), never the reply bytes themselves.
+     */
+    private function logRejectedOrigin(?string $replyHost, ?int $replyPort): void
+    {
+        $now = time();
+        if ($now - $this->lastOriginRejectLogAt < self::ORIGIN_REJECT_LOG_INTERVAL_SEC) {
+            return;
+        }
+        $this->lastOriginRejectLogAt = $now;
+
+        error_log(sprintf(
+            'AniDB UDP: reply rejected — origin %s:%s is not in the %s allowlist '
+            . '(the resolved set refreshes within %d s). Throttled to once per %d s.',
+            $replyHost === null ? '(unknown)' : substr($replyHost, 0, 64),
+            $replyPort === null ? '(unknown)' : (string) $replyPort,
+            self::API_HOST,
+            self::ORIGIN_HOSTS_TTL_SEC,
+            self::ORIGIN_REJECT_LOG_INTERVAL_SEC,
+        ));
     }
 
     /**

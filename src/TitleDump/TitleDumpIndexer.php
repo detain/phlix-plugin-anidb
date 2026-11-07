@@ -103,12 +103,15 @@ final class TitleDumpIndexer
     {
         $host = parse_url($url, PHP_URL_HOST);
         if (!is_string($host) || $host === '') {
-            // Deliberately echoes the URL: by contract it carries no
-            // credentials (scheme-guarded http(s) download URL), and a
-            // hostless fetch failing loudly is strictly better than a
-            // peer-name-less verification pass.
+            // PG-159: echo goes through the single scrubber. The old comment
+            // claimed the URL was credential-free "by contract" — false, no
+            // such contract exists. urlForLog makes the echo honest by
+            // construction: a provably credential-free host-less string is
+            // still echoed verbatim (a hostless fetch failing loudly beats a
+            // peer-name-less verification pass), while any userinfo-bearing
+            // shape is scrubbed or withheld.
             throw new RuntimeException(
-                'TitleDumpIndexer: title dump URL has no host to verify: ' . $url
+                'TitleDumpIndexer: title dump URL has no host to verify: ' . self::urlForLog($url)
             );
         }
 
@@ -915,6 +918,82 @@ final class TitleDumpIndexer
         }
 
         return basename($absolutePath);
+    }
+
+    /**
+     * Rendered in place of a URL whose shape cannot be PROVEN credential-free
+     * (parse_url fails on it, or it carries userinfo the parser cannot
+     * classify) — see {@see self::urlForLog()}.
+     */
+    public const UNLOGGABLE_URL = '(title_dump_url withheld — credentials suspected)';
+
+    /**
+     * Render a configured dump URL for a log line or exception message —
+     * never with credentials.
+     *
+     * PG-159 (review anidb__secaudit #2[m]): the credential-echo policy used
+     * to be inconsistent — the scheme guard refused to echo the URL "it may
+     * embed userinfo" and the cleartext warning logged only the parsed host,
+     * while the constructor migration log echoed the stored URL verbatim and
+     * {@see self::httpClientConfig()} embedded the full URL in a thrown
+     * RuntimeException under a comment claiming it was credential-free by
+     * contract. No such contract existed: nothing rejects or strips a
+     * `user:pass@` component, and TitleDumpUrlMigration preserves userinfo
+     * across the scheme swap. This single scrubber makes EVERY echo honest by
+     * construction:
+     *
+     * - parseable, no userinfo → returned byte-identically (existing honest
+     *   diagnostics keep their exact rendering);
+     * - `user` or `pass` present → replaced with `***@`, scheme/host/port/
+     *   path/query/fragment preserved;
+     * - unparseable, or a scheme-less `user:pass@host/...` shape (which
+     *   parse_url misclassifies as scheme+path, hiding its credentials from
+     *   the first check) → withheld outright.
+     */
+    public static function urlForLog(string $url): string
+    {
+        $parts = parse_url($url);
+
+        if ($parts === false) {
+            return self::UNLOGGABLE_URL;
+        }
+
+        if (!isset($parts['user']) && !isset($parts['pass'])) {
+            // Belt for the scheme-less shape: '@' before the first path/query/
+            // fragment delimiter is a credential that parse_url only sees as a
+            // scheme/path split. A benign '@' lives after that delimiter
+            // (path/query/fragment), so this cannot withhold a clean URL.
+            if (str_contains(substr($url, 0, strcspn($url, '/?#')), '@')) {
+                return self::UNLOGGABLE_URL;
+            }
+
+            return $url;
+        }
+
+        $authority = '***';
+        if (isset($parts['host'])) {
+            $host = $parts['host'];
+            if (str_contains($host, ':') && !str_starts_with($host, '[')) {
+                $host = '[' . $host . ']';
+            }
+            $authority .= '@' . $host;
+            if (isset($parts['port'])) {
+                $authority .= ':' . $parts['port'];
+            }
+        }
+
+        $scrubbed = (isset($parts['scheme']) ? $parts['scheme'] . '://' : '') . $authority;
+        if (isset($parts['path'])) {
+            $scrubbed .= $parts['path'];
+        }
+        if (isset($parts['query'])) {
+            $scrubbed .= '?' . $parts['query'];
+        }
+        if (isset($parts['fragment'])) {
+            $scrubbed .= '#' . $parts['fragment'];
+        }
+
+        return $scrubbed;
     }
 
     /**

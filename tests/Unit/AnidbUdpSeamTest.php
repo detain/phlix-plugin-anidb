@@ -95,7 +95,7 @@ final class AnidbUdpSeamTest extends TestCase
     public static function authFailureProvider(): array
     {
         return [
-            '500 invalid credentials' => ['500 LOGIN FAILED', 'invalid username or API password'],
+            '500 invalid credentials' => ['500 LOGIN FAILED', 'invalid "AniDB Username" or "AniDB UDP API Key" (the key is the API password set in your AniDB profile, not your login password)'],
             '503 outdated client'     => ['503 CLIENT VERSION OUTDATED', 'client version outdated'],
             '504 client banned'       => ['504 CLIENT BANNED - flooding', 'this client version is banned (your account is not)'],
             '555 banned'              => ['555 BANNED - too many failed logins', 'temporarily banned'],
@@ -450,7 +450,10 @@ final class AnidbUdpSeamTest extends TestCase
 
         $exception = $client->parseAuthFailure('500 LOGIN FAILED');
         $this->assertInstanceOf(\RuntimeException::class, $exception);
-        $this->assertStringContainsString('invalid username', $exception->getMessage());
+        // Exact form labels name the fields to fix; "API password" appears
+        // only as the AniDB-profile direction for where the key is set.
+        $this->assertStringContainsString('invalid "AniDB Username" or "AniDB UDP API Key"', $exception->getMessage());
+        $this->assertStringContainsString('API password set in your AniDB profile', $exception->getMessage());
     }
 
     public function test_parse_auth_failure_503(): void

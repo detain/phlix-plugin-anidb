@@ -88,14 +88,15 @@ final class UdpClient
     private const ORIGIN_REJECT_LOG_INTERVAL_SEC = 300;
 
     /**
-     * Setting key → human-style field name used in the credential-guard
-     * message, so an operator can map it onto the settings form (whose
-     * labels are "AniDB Username" and "AniDB UDP API Key") instead of
-     * decoding raw setting keys.
+     * Setting key → the exact settings-form label (plugin.json `label`) the
+     * credential-guard message prints, quoted, so an operator finds the field
+     * on the form verbatim instead of decoding raw setting keys. Kept in
+     * lockstep with plugin.json by UdpClientCredentialGuardTest, which reads
+     * the manifest labels and asserts the thrown message carries them.
      */
     private const CREDENTIAL_LABELS = [
-        'username' => 'username',
-        'api_key' => 'API key',
+        'username' => 'AniDB Username',
+        'api_key' => 'AniDB UDP API Key',
     ];
 
     /**
@@ -338,7 +339,7 @@ final class UdpClient
      *
      * The constructor's array{username, api_key} shape is documentation-time
      * only — plugin settings can deliver a missing key, a non-string value, or
-     * an empty string (fresh installs before an API password is entered).
+     * an empty string (fresh installs before the AniDB UDP API Key is entered).
      * Without this guard the sprintf() in authenticate() emitted an undefined-
      * key warning and sent a malformed AUTH datagram the server rejected
      * opaquely. Fail fast with a descriptive error instead.
@@ -359,10 +360,12 @@ final class UdpClient
         }
 
         if ($unusable !== []) {
-            throw new \RuntimeException(
-                'AniDB: username and API key settings are required (missing or empty: '
-                . implode(', ', $unusable) . ')'
-            );
+            $quote = static fn (string $label): string => '"' . $label . '"';
+            throw new \RuntimeException(sprintf(
+                'AniDB: the %s settings are required (missing or empty: %s)',
+                implode(' and ', array_map($quote, self::CREDENTIAL_LABELS)),
+                implode(', ', array_map($quote, $unusable))
+            ));
         }
     }
 
@@ -434,7 +437,11 @@ final class UdpClient
     public function parseAuthFailure(string $response): \RuntimeException
     {
         if (str_starts_with($response, '500')) {
-            return new \RuntimeException('AniDB AUTH failed: invalid username or API password');
+            return new \RuntimeException(
+                'AniDB AUTH failed: invalid "' . self::CREDENTIAL_LABELS['username'] . '" or "'
+                . self::CREDENTIAL_LABELS['api_key'] . '" (the key is the API password set in your'
+                . ' AniDB profile, not your login password)'
+            );
         }
         if (str_starts_with($response, '503')) {
             return new \RuntimeException('AniDB AUTH failed: client version outdated');

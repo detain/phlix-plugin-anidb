@@ -35,9 +35,15 @@ The plugin is unsigned by design. Install via the Phlix admin UI:
 
 4. The server downloads and validates the manifest, runs `composer install --no-dev`, and stores a row in the `plugins` table.
 5. Configure your AniDB credentials in the plugin settings form:
-   - **Username**: your AniDB username
-   - **API Key**: your AniDB UDP API Key — the API password you set in your
-     AniDB profile, NOT your login password
+   - **AniDB Username**: your AniDB username
+   - **AniDB UDP API Key**: the API password you set in your AniDB profile
+     (Settings → Account → API), NOT your login password
+
+   If either is missing or empty, AUTH is refused before any datagram is sent
+   with `AniDB: the "AniDB Username" and "AniDB UDP API Key" settings are
+   required (missing or empty: …)`, naming each unusable field by its form
+   label. A server-side `500 LOGIN FAILED` surfaces as `AniDB AUTH failed:
+   invalid "AniDB Username" or "AniDB UDP API Key" …`.
 6. Enable the plugin.
 
 ## Requirements
@@ -103,7 +109,7 @@ resident Workerman worker.
 
 ### Protocol & credential posture
 
-The AUTH command carries your AniDB username and API password in a **cleartext
+The AUTH command carries your AniDB username and UDP API Key in a **cleartext
 UDP datagram** — the AniDB UDP API has no TLS/encrypted transport and no TCP
 alternative exists for it. This is protocol-inherent, not a Phlix shortcut: any
 party on the network path between the Phlix server and `api.anidb.net:9000`

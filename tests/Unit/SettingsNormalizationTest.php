@@ -158,7 +158,7 @@ final class SettingsNormalizationTest extends TestCase
                 // an EXCEPTION, never a per-lookup warning stream.
                 $reflection->invoke($provider, 'Cowboy Bebop');
             } catch (\RuntimeException $expected) {
-                $this->assertStringContainsString('username and API key settings are required', $expected->getMessage());
+                $this->assertStringContainsString('the "AniDB Username" and "AniDB UDP API Key" settings are required', $expected->getMessage());
             }
         });
     }

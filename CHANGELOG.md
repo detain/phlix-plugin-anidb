@@ -17,6 +17,19 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- The credential-guard and AUTH-500 messages now name the settings by their
+  exact form labels (ANI-S8, review ANI-11). The guard used to say `username
+  and API key settings are required (missing or empty: API key)` while the
+  form field reads "AniDB UDP API Key", and its docblock claimed a mapping onto
+  the form labels it did not print. It now reads `AniDB: the "AniDB Username"
+  and "AniDB UDP API Key" settings are required (missing or empty: "AniDB UDP
+  API Key")`, and a `500 LOGIN FAILED` reads `invalid "AniDB Username" or
+  "AniDB UDP API Key" (the key is the API password set in your AniDB profile,
+  not your login password)` — "API password" survives only as the direction
+  to where the key is set in the AniDB profile. A test reads the labels from
+  `plugin.json` so a relabel there cannot drift silently. Log matchers keyed on
+  `username and API key settings are required` or `invalid username or API
+  password` need updating.
 - The 504 and 555 AUTH-failure messages no longer embed the raw datagram
   tail (ANI-S7, review ANI-17): like the generic arm, they now pass the
   server detail through the M-ANIDB-29 scrubber (session keys redacted,

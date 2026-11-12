@@ -28,6 +28,12 @@ use PHPUnit\Framework\TestCase;
  */
 final class UdpClientCredentialGuardTest extends TestCase
 {
+    /**
+     * The guard names the settings by their exact settings-form labels
+     * (plugin.json `label`), so an operator can find the field verbatim.
+     */
+    private const GUARD_STEM = 'AniDB: the "AniDB Username" and "AniDB UDP API Key" settings are required';
+
     private function makeClient(array $settings, GuardTransport $transport): UdpClient
     {
         return new UdpClient($settings, $transport, new SilentWaiter());
@@ -65,7 +71,7 @@ final class UdpClientCredentialGuardTest extends TestCase
         }
 
         $this->assertInstanceOf(\RuntimeException::class, $thrown);
-        $this->assertStringContainsString('AniDB: username and API key settings are required', $thrown->getMessage());
+        $this->assertStringContainsString(self::GUARD_STEM, $thrown->getMessage());
         $this->assertSame([], $transport->sent, 'a malformed AUTH datagram reached the transport');
         $this->assertSame(0, $transport->openCount);
         $this->assertNull($client->getSessionKey());
@@ -80,9 +86,65 @@ final class UdpClientCredentialGuardTest extends TestCase
         $client = $this->makeClient($settings, $transport);
 
         $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('AniDB: username and API key settings are required');
+        $this->expectExceptionMessage(self::GUARD_STEM);
 
         $client->sendCommand('ANIME aid=1');
+    }
+
+    /**
+     * @return array<string, array{array<string, mixed>, string}>
+     */
+    public static function missingListProvider(): array
+    {
+        return [
+            'both keys absent' => [[], '(missing or empty: "AniDB Username", "AniDB UDP API Key")'],
+            'api_key empty' => [['username' => 'user', 'api_key' => ''], '(missing or empty: "AniDB UDP API Key")'],
+            'username non-string' => [['username' => ['user'], 'api_key' => 'key'], '(missing or empty: "AniDB Username")'],
+        ];
+    }
+
+    /**
+     * The missing-or-empty list names each unusable field by its exact
+     * form label — never a raw setting key, never "API password".
+     *
+     * @dataProvider missingListProvider
+     */
+    public function test_missing_list_names_exact_form_labels(array $settings, string $expectedTail): void
+    {
+        $client = $this->makeClient($settings, new GuardTransport());
+
+        try {
+            $client->authenticate();
+            $this->fail('authenticate() accepted unusable credentials');
+        } catch (\RuntimeException $e) {
+            $this->assertSame(self::GUARD_STEM . ' ' . $expectedTail, $e->getMessage());
+            $this->assertStringNotContainsString('API password', $e->getMessage());
+        }
+    }
+
+    /**
+     * The labels the guard prints must be the labels the settings form
+     * shows: read them from plugin.json so a relabel there turns this red.
+     */
+    public function test_guard_labels_match_plugin_json_form_labels(): void
+    {
+        $manifest = json_decode(
+            (string) file_get_contents(dirname(__DIR__, 2) . '/plugin.json'),
+            true,
+            512,
+            JSON_THROW_ON_ERROR
+        );
+        $usernameLabel = $manifest['settings']['username']['label'];
+        $apiKeyLabel = $manifest['settings']['api_key']['label'];
+
+        $client = $this->makeClient([], new GuardTransport());
+        try {
+            $client->authenticate();
+            $this->fail('authenticate() accepted absent credentials');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('"' . $usernameLabel . '"', $e->getMessage());
+            $this->assertStringContainsString('"' . $apiKeyLabel . '"', $e->getMessage());
+        }
     }
 
     public function test_valid_credentials_still_reach_the_transport(): void

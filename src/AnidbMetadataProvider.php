@@ -242,7 +242,7 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
             // pair in the shared error log.
             error_log(sprintf(
                 'AnidbMetadataProvider: migrated stored title_dump_url "%s" -> "%s" '
-                . '(AniDB answers plain http with 403)',
+                . '(AniDB answers plain HTTP with 403)',
                 TitleDumpIndexer::urlForLog($configuredDumpUrl),
                 TitleDumpIndexer::urlForLog($effectiveDumpUrl),
             ));

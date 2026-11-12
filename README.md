@@ -68,7 +68,7 @@ Configure these in the Phlix admin **Plugins → Configure** dialog.
 | `username` | string | **Yes** | — | Your AniDB account username. [Register free](https://anidb.net/). |
 | `api_key` | string (secret) | **Yes** | — | The UDP **API Key** (API password) set in your AniDB profile under Settings → Account → API — separate from your login password. See the [AniDB API docs](https://anidb.net/software/api). |
 | `use_title_dump` | boolean | No | `true` | Download the daily title dump for fast, offline search (reduces rate-limited API calls). |
-| `title_dump_url` | string | No | `https://anidb.net/api/anime-titles.dat.gz` | URL to `anime-titles.dat.gz`; change only for a mirror. Must be **https** — AniDB's Cloudflare front answers plain http with 403, and any other plain-http URL is refused (no download, a `REFUSING` log line) unless the server environment sets `PHLIX_ANIDB_ALLOW_HTTP_DUMP_MIRROR=1` — see "Protocol & credential posture". A stored `http://…anidb.net/…` value from before 0.4.1 is migrated to https automatically. |
+| `title_dump_url` | string | No | `https://anidb.net/api/anime-titles.dat.gz` | URL to `anime-titles.dat.gz`; change only for a mirror. Must be **HTTPS** — AniDB's Cloudflare front answers plain HTTP with 403, and any other plain-HTTP URL is refused (no download, a `REFUSING` log line) unless the server environment sets `PHLIX_ANIDB_ALLOW_HTTP_DUMP_MIRROR=1` — see "Protocol & credential posture". A stored `http://…anidb.net/…` value from before 0.4.1 is migrated to https automatically. |
 | `cache_dir` | string | No | — | Absolute path of a writable directory for the title-dump index. It **must** live outside the read-only plugin tree (systemd sandbox) and **must not** be world-writable (the index is served from it). A relative path, a non-string value, or an existing world-writable directory is refused at construction with a loud error. Unset falls back to the `PHLIX_ANIDB_CACHE_DIR` environment variable (same rule), then the system temp dir. |
 
 The title-dump index is written to a writable cache directory outside the plugin tree, resolved in this order: constructor argument → `cache_dir` setting → the `PHLIX_ANIDB_CACHE_DIR` environment variable → `sys_get_temp_dir()/phlix-plugin-anidb`.
@@ -132,10 +132,10 @@ reply accepted. That reply could be fake metadata or a fake AUTH/session
 answer. The protocol cannot close this gap. The mitigation is the same trusted
 network path described above.
 
-**`title_dump_url` must be https (default-deny cleartext).** The title dump
-feeds every worker's offline title→AID index, and a plain-http download has no
+**`title_dump_url` must be HTTPS (default-deny cleartext).** The title dump
+feeds every worker's offline title→AID index, and a plain-HTTP download has no
 certificate to verify, so anyone on the network path could serve a forged dump.
-A non-https `title_dump_url` is therefore **refused**: each download attempt
+A non-HTTPS `title_dump_url` is therefore **refused**: each download attempt
 logs `TitleDumpIndexer: REFUSING download — title_dump_url uses cleartext HTTP
 (http://<host>)` and contacts nothing, and the previously cached index (if any)
 keeps serving. If your mirror genuinely has no https, set the environment

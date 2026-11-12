@@ -86,7 +86,7 @@ final class TitleDumpIndexer
      * Explicit opt-in env for a cleartext (`http://`) title_dump_url (ANI-S9).
      *
      * The dump is the integrity source for every worker's title→AID index and
-     * an http leg has no certificate to verify, so a non-https URL is REFUSED
+     * an HTTP leg has no certificate to verify, so a non-https URL is REFUSED
      * by default. An operator whose mirror genuinely has no https sets this to
      * exactly `1` to keep fetching it — every such attempt still logs the loud
      * cleartext warning. Any other value (`0`, `true`, `yes`, padded) is not
@@ -163,7 +163,7 @@ final class TitleDumpIndexer
      * M-ANIDB-08 ssl context protects nothing (no certificate is involved on
      * http). Pinning `allow_redirects.max` to 0 means a 3xx arrives as the
      * final response; it is not valid gzip, and the existing REFUSING
-     * fail-closed arm turns the redirect into a LOUD failed attempt instead
+     * fail-closed arm turns the redirect into a visible failed attempt instead
      * of a quiet cleartext success.
      *
      * @return array{
@@ -1085,8 +1085,8 @@ final class TitleDumpIndexer
             // retry floor bounds how often this line can repeat.
             error_log(sprintf(
                 'TitleDumpIndexer: REFUSING download — title_dump_url uses cleartext HTTP (http://%s). '
-                . 'The dump feeds every worker\'s title index and an http leg has no certificate to verify. '
-                . 'Point title_dump_url at an https mirror, or set %s=1 if your mirror truly has no https.',
+                . 'The dump feeds every worker\'s title index and an HTTP leg has no certificate to verify. '
+                . 'Point title_dump_url at an HTTPS mirror, or set %s=1 if your mirror truly has no HTTPS.',
                 self::hostForLog($this->titleDumpUrl),
                 self::ALLOW_HTTP_DUMP_MIRROR_ENV,
             ));
@@ -1110,7 +1110,7 @@ final class TitleDumpIndexer
         $bodyBytes = strlen($fetchResult);
         if ($bodyBytes > self::MAX_DOWNLOAD_BYTES) {
             error_log(sprintf(
-                'TitleDumpIndexer: REFUSING response — body is %s (%d bytes), over the %s (%d-byte) compressed-download cap',
+                'TitleDumpIndexer: REFUSING response — body is %s (%d bytes), over the %s (%d-byte) compressed-download cap.',
                 self::mebibytes($bodyBytes),
                 $bodyBytes,
                 self::mebibytes(self::MAX_DOWNLOAD_BYTES),
@@ -1128,7 +1128,7 @@ final class TitleDumpIndexer
 
         if (strlen($decoded) >= self::MAX_DECOMPRESSED_BYTES) {
             error_log(sprintf(
-                'TitleDumpIndexer: REFUSING response — decompressed size reached the %s (%d-byte) cap (gzip bomb or truncated dump)',
+                'TitleDumpIndexer: REFUSING response — decompressed size reached the %s (%d-byte) cap (gzip bomb or truncated dump).',
                 self::mebibytes(self::MAX_DECOMPRESSED_BYTES),
                 self::MAX_DECOMPRESSED_BYTES,
             ));
@@ -1282,7 +1282,7 @@ final class TitleDumpIndexer
             // Count and ceiling only — never the violating line content, which
             // is untrusted dump data (log-injection class).
             error_log(sprintf(
-                'TitleDumpIndexer: REFUSING %d dump lines whose AID column is malformed or out-of-range (ceiling %d)',
+                'TitleDumpIndexer: REFUSING %d dump lines whose AID column is malformed or out-of-range (ceiling %d).',
                 $refusedAidLines,
                 self::MAX_AID,
             ));
@@ -1336,16 +1336,16 @@ final class TitleDumpIndexer
         // M-ANIDB-10: a cleartext dump download must be VISIBLE. Since ANI-S9
         // doDownloadAndIndex() refuses http:// before reaching here unless the
         // operator set ALLOW_HTTP_DUMP_MIRROR_ENV=1, so this arm is the
-        // opted-in mirror path: still exactly one loud line per attempt
+        // opted-in mirror path: still exactly one warning line per attempt
         // naming the host (never the full URL — settings values can embed
         // credentials). The warning sits at this seam so it fires for every
         // transport, production client and injected fakes alike.
         if (!self::isHttpsUrl($this->titleDumpUrl)) {
             error_log(
-                'TitleDumpIndexer: LOUD WARNING — title dump fetch over cleartext HTTP (http://'
+                'TitleDumpIndexer: WARNING — title dump fetch over cleartext HTTP (http://'
                 . self::hostForLog($this->titleDumpUrl)
                 . ') — allowed only because ' . self::ALLOW_HTTP_DUMP_MIRROR_ENV . '=1 is set; '
-                . 'AniDB serves the dump over https and the plugin documents https mirrors.'
+                . 'AniDB serves the dump over HTTPS and the plugin documents HTTPS mirrors.'
             );
         }
 

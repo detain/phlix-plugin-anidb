@@ -39,7 +39,7 @@
             "default": "https://anidb.net/api/anime-titles.dat.gz",
             "tier": "advanced",
             "label": "Title Dump URL",
-            "description": "Source URL for the anime-titles.dat.gz file. Optional — change only if using a mirror. Must be https — AniDB sits behind Cloudflare, which answers plain-http requests with a 403, and a plain-http mirror is refused (no download) unless the server environment sets PHLIX_ANIDB_ALLOW_HTTP_DUMP_MIRROR=1."
+            "description": "Source URL for the anime-titles.dat.gz file. Optional — change only if using a mirror. Must be HTTPS — AniDB sits behind Cloudflare, which answers plain-HTTP requests with a 403, and a plain-HTTP mirror is refused (no download) unless the server environment sets PHLIX_ANIDB_ALLOW_HTTP_DUMP_MIRROR=1."
         },
         "cache_dir": {
             "type": "string",

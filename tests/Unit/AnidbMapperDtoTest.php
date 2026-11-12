@@ -243,4 +243,78 @@ final class AnidbMapperDtoTest extends TestCase
         $this->assertTrue($mapped['is_movie']);
         $this->assertSame('movie', $mapped['type']);
     }
+
+    /**
+     * ANI-7: a second fetchAnimeMetadata() for the same AID inside the TTL is
+     * served from the per-instance memo (no further UDP traffic).
+     */
+    public function test_fetch_anime_metadata_memo_hit_sends_no_second_command(): void
+    {
+        [$provider, $transport] = $this->makeProvider();
+        $transport->responses = [
+            '200 SESSIONKEY LOGIN ACCEPTED',
+            self::animeResponse(),
+            "233 ANIMEDESC\n0|1|Blurb.",
+        ];
+
+        $first = $provider->fetchAnimeMetadata(42);
+        $sent = count($transport->commands);
+        $this->assertNotSame([], $first);
+
+        $second = $provider->fetchAnimeMetadata(42);
+
+        $this->assertSame($first, $second);
+        $this->assertCount($sent, $transport->commands, 'memo hit must not touch the transport');
+    }
+
+    /**
+     * ANI-7: once the TTL lapses the memo entry is ignored and refetched.
+     */
+    public function test_fetch_anime_metadata_memo_expiry_refetches(): void
+    {
+        [$provider, $transport] = $this->makeProvider();
+        $transport->responses = [
+            '200 SESSIONKEY LOGIN ACCEPTED',
+            self::animeResponse(),
+            "233 ANIMEDESC\n0|1|Blurb.",
+            self::animeResponse(),
+            "233 ANIMEDESC\n0|1|Blurb.",
+        ];
+
+        $provider->fetchAnimeMetadata(42);
+        $sent = count($transport->commands);
+
+        $ref = new \ReflectionProperty($provider, 'metadataMemo');
+        $ref->setAccessible(true);
+        $memo = $ref->getValue($provider);
+        $memo[42]['expires'] = time() - 1;
+        $ref->setValue($provider, $memo);
+
+        $again = $provider->fetchAnimeMetadata(42);
+
+        $this->assertNotSame([], $again);
+        $this->assertGreaterThan($sent, count($transport->commands), 'expired memo must refetch');
+    }
+
+    /**
+     * ANI-7: the adapter's getDetails() then getImages() pair costs one fetch.
+     */
+    public function test_adapter_get_images_is_served_from_memo_after_get_details(): void
+    {
+        [$provider, $transport] = $this->makeProvider();
+        $transport->responses = [
+            '200 SESSIONKEY LOGIN ACCEPTED',
+            self::animeResponse(),
+            "233 ANIMEDESC\n0|1|Blurb.",
+        ];
+        $adapter = new \Phlix\Anidb\AnidbMetadataProviderAdapter($provider);
+
+        $details = $adapter->getDetails('42');
+        $sent = count($transport->commands);
+        $images = $adapter->getImages('42');
+
+        $this->assertNotSame([], $details);
+        $this->assertArrayHasKey('poster', $images);
+        $this->assertCount($sent, $transport->commands, 'getImages must reuse the memo');
+    }
 }

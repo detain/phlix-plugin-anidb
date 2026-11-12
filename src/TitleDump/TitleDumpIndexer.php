@@ -1294,7 +1294,7 @@ final class TitleDumpIndexer
 
         if ($refusedLongLines > 0) {
             error_log(sprintf(
-                'TitleDumpIndexer: REFUSING %d dump lines longer than %d bytes.',
+                'TitleDumpIndexer: REFUSING %d dump line(s) longer than %d bytes.',
                 $refusedLongLines,
                 self::MAX_LINE_BYTES,
             ));

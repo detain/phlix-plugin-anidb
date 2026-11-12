@@ -69,6 +69,12 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
     /**
      * AniDB UDP API server hostname.
      */
+    /** Seconds a memoised fetchAnimeMetadata() result is served (resident-worker staleness bound). */
+    private const METADATA_MEMO_TTL_SECONDS = 60;
+
+    /** Upper bound on memoised AIDs; the memo is flushed when reached. */
+    private const METADATA_MEMO_MAX_ENTRIES = 256;
+
     private const API_HOST = 'api.anidb.net';
 
     /**
@@ -168,6 +174,19 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      * (item-5c3); {@see onDisable()} resets it alongside close().
      */
     private bool $connected = false;
+
+    /**
+     * Per-instance, per-AID memo of mapped fetchAnimeMetadata() results.
+     *
+     * Staleness note: a resident worker keeps this object alive for its whole
+     * life, so entries carry a short TTL ({@see METADATA_MEMO_TTL_SECONDS}) and
+     * the memo is bounded ({@see METADATA_MEMO_MAX_ENTRIES}); it is NOT a
+     * durable cache and is never shared between workers. Only successful
+     * (non-empty) results are memoised, so a transient UDP failure is retried.
+     *
+     * @var array<int, array{expires: int, data: array<string, mixed>}>
+     */
+    private array $metadataMemo = [];
 
     /**
      * Lazily-built host-contract adapter, reused by both the legacy
@@ -761,6 +780,12 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      * {@see AnidbMetadataProviderAdapter::getDetails()} /
      * {@see AnidbMetadataProviderAdapter::getImages()}.
      *
+     * Results are memoised per AID for a short TTL so the adapter's
+     * search() -> getDetails() -> getImages() triad costs one UDP round trip
+     * (plus its ANIMEDESC) instead of one per call (review ANI-7). The memo is
+     * per-instance and short-lived by design: a resident worker may serve a
+     * record up to METADATA_MEMO_TTL_SECONDS stale.
+     *
      * @param int $aid AniDB anime ID.
      *
      * @return array<string, mixed> Mapped metadata array, or `[]` when not found.
@@ -771,6 +796,13 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
             return [];
         }
 
+        $now = time();
+        $memo = $this->metadataMemo[$aid] ?? null;
+        if ($memo !== null && $memo['expires'] > $now) {
+            return $memo['data'];
+        }
+        unset($this->metadataMemo[$aid]);
+
         $this->ensureConnected();
 
         $anime = $this->fetchAnimeDetails($aid);
@@ -778,7 +810,17 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
             return [];
         }
 
-        return $this->mapToMetadataReturn($anime);
+        $mapped = $this->mapToMetadataReturn($anime);
+
+        if (count($this->metadataMemo) >= self::METADATA_MEMO_MAX_ENTRIES) {
+            $this->metadataMemo = [];
+        }
+        $this->metadataMemo[$aid] = [
+            'expires' => $now + self::METADATA_MEMO_TTL_SECONDS,
+            'data'    => $mapped,
+        ];
+
+        return $mapped;
     }
 
     /**

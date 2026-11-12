@@ -17,6 +17,15 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Changed
+- `fetchAnimeMetadata()` now memoises its mapped result per AID for 60 s
+  (bounded to 256 entries, per-instance, successes only) so the adapter's
+  search/getDetails/getImages triad costs one UDP round trip instead of
+  three (ANI-S14, review ANI-7). A resident worker may therefore serve a
+  record up to 60 s stale.
+- The title-dump over-long-line refusal notice now reads `REFUSING <n> dump
+  line(s) longer than <max> bytes` so the count agrees in number (ANI-S14,
+  folded ANI-S13 minor); the refusal itself (ANI-S13) was previously
+  unrecorded here.
 - **Behavior change — a non-https `title_dump_url` is now refused by default**
   (ANI-S9, review ANI-9). The title dump is the integrity source for every
   worker's title→AID index, and a cleartext leg has no certificate to verify,

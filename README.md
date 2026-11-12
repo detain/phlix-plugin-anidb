@@ -136,7 +136,8 @@ transport error class/message — never body content. There is **no host
 allowlist and no private/loopback-range deny** on this URL today, so an
 administrator can point the fetch at an internal address and the server will
 send that request; only the transport outcome is logged. This is accepted
-because only administrators can set the URL. **If `title_dump_url` ever becomes settable by members**, a host
+because only administrators can set the URL.
+**If `title_dump_url` ever becomes settable by members**, a host
 allowlist or a private-range deny must ship in the same change.
 
 See the [AniDB UDP API docs](https://wiki.anidb.net/UDP_API_Definition) for full details.

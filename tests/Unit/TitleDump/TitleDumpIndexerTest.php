@@ -195,7 +195,7 @@ DAT;
 
             $logged = file_get_contents($logFile);
             $this->assertIsString($logged);
-            $this->assertStringContainsString('REFUSING 2 dump lines with malformed or out-of-range AID', $logged);
+            $this->assertStringContainsString('REFUSING 2 dump lines whose AID column is malformed or out-of-range', $logged);
             $this->assertStringNotContainsString('Garbage aid', $logged, 'violating line content must not reach the log');
         } finally {
             $restoreLog();
@@ -216,7 +216,7 @@ DAT;
 
             $logged = @file_get_contents($logFile);
             $this->assertStringNotContainsString(
-                'out-of-range AID',
+                'REFUSING',
                 is_string($logged) ? $logged : '',
                 'a clean dump must not carry a refusal notice'
             );

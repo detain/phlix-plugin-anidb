@@ -17,6 +17,13 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- The title-dump AID refusal notice now reads `REFUSING <n> dump lines
+  whose AID column is malformed or out-of-range (ceiling <max>)` (ANI-S4,
+  review ANI-26): the old wording quoted further down this section ("with
+  malformed or out-of-range AID") paired a plural line count with a single
+  AID. That entry is kept as it was written; this entry records the
+  correction. Log matchers keyed on the old phrase need updating; the count
+  and ceiling are unchanged and no line content is echoed.
 - Rejected UDP reply origins name themselves, and the trusted-origin
   allowlist refreshes itself (review anidb__srphp #9[i]; program w15 L4,
   all tests measured red on the parent first — departed-lane evidence

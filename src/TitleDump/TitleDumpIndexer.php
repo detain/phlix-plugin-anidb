@@ -1244,7 +1244,7 @@ final class TitleDumpIndexer
             // Count and ceiling only — never the violating line content, which
             // is untrusted dump data (log-injection class).
             error_log(sprintf(
-                'TitleDumpIndexer: REFUSING %d dump lines with malformed or out-of-range AID (ceiling %d)',
+                'TitleDumpIndexer: REFUSING %d dump lines whose AID column is malformed or out-of-range (ceiling %d)',
                 $refusedAidLines,
                 self::MAX_AID,
             ));

@@ -398,6 +398,15 @@ final class UdpClient
             return;
         }
 
+        // The PING reply shape is UNVERIFIED on the wire (ANI-6): no credentialed
+        // capture exists yet, so the "200 PONG" in the test fixture is an
+        // assumption, not evidence. Defensive stance: the reply is deliberately
+        // ignored whatever it is (null / timeout, a 001 ACK-only frame, a
+        // PONG-like 2xx, anything else) and never alters session state. Gated
+        // follow-up (deferred-gated:ANI-S19 capture=credentialed-PING-reply):
+        // if the capture shows ACK-only, exempt PING/LOGOUT from result-frame
+        // waiting in SocketUdpClient::send() so the 10 s budget cannot burn
+        // every keep-alive interval.
         $this->udpSend('PING s=' . $this->sessionKey);
         $this->lastActivityTime = time();
     }

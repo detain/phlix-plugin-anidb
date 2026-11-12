@@ -97,6 +97,8 @@ phlix-plugin-anidb/
 
 **Session validity:** 35 minutes of inactivity. Keep-alive via `PING` command.
 
+> PING reply shape is UNVERIFIED (no credentialed capture yet). The client ignores the reply whatever it is; if a capture shows ACK-only, PING/LOGOUT will be exempted from result-frame waiting (gated: capture=credentialed-PING-reply).
+
 ### 2.4 Key Commands
 
 #### ANIME — Fetch anime details

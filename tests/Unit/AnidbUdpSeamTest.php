@@ -294,7 +294,10 @@ final class AnidbUdpSeamTest extends TestCase
     {
         $udp = new FakeUdpClient([
             '200 SESSION_KEY LOGIN ACCEPTED',
-            '200 PONG', // PING response
+            // ASSUMPTION, NOT WIRE EVIDENCE (ANI-6): the real PING reply shape is
+            // uncaptured (may be ACK-only, 001 overhead). Premise falsifiable by
+            // the gated credentialed capture; ping() must not depend on it.
+            '200 PONG', // PING response (fabricated placeholder)
         ]);
         $waiter = new NoOpWaiter();
 
@@ -313,6 +316,33 @@ final class AnidbUdpSeamTest extends TestCase
         // Verify PING was sent
         $this->assertCount(1, $udp->sent);
         $this->assertStringStartsWith('PING', $udp->sent[0]);
+    }
+
+    /**
+     * @return array<string, array{0: string|null}>
+     */
+    public static function pingReplyShapes(): array
+    {
+        return [
+            'timeout' => [null],
+            'ack only' => ['001 COMMAND ACCEPTED'],
+            'pong-like' => ['200 PONG'],
+            'unexpected' => ['598 UNKNOWN COMMAND'],
+        ];
+    }
+
+    /** @dataProvider pingReplyShapes */
+    public function test_ping_ignores_any_reply_shape_and_keeps_session(?string $reply): void
+    {
+        $udp = new FakeUdpClient(['200 SESSION_KEY LOGIN ACCEPTED', $reply]);
+        $client = $this->makeUdpClient($udp, new NoOpWaiter());
+        $client->authenticate();
+
+        $m = (new \ReflectionClass($client))->getMethod('ping');
+        $m->setAccessible(true);
+        $m->invoke($client);
+
+        $this->assertTrue($client->isAuthenticated());
     }
 
     public function test_needs_keep_alive_returns_false_immediately_after_auth(): void

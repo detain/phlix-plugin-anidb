@@ -258,6 +258,85 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
         // onDisable should close
         $provider->onDisable();
         $this->assertTrue($transport->closed);
+
+        // ...and reset the lazy-connect guard alongside the close (ANI-3):
+        // a stuck `connected` would skip open() on every later lookup.
+        $connected = new \ReflectionProperty($provider, 'connected');
+        $this->assertFalse($connected->getValue($provider), 'onDisable() must reset the lazy-connect guard');
+    }
+
+    /**
+     * The disable→enable→lookup law (ANI-3): a provider that was disabled and
+     * re-enabled MUST re-open its transport on the next lookup. Before the
+     * fix onDisable() closed the socket but left `connected` true, so every
+     * later lookup skipped ensureConnected()'s open() and sent into a closed
+     * transport — a permanently poisoned provider.
+     */
+    public function test_disable_then_enable_reopens_transport_on_next_lookup(): void
+    {
+        $transport = new class implements UdpClientInterface {
+            public int $openCount = 0;
+            public int $closeCount = 0;
+            public bool $isOpen = false;
+            /** @var list<string> */
+            public array $sentWhileClosed = [];
+            public function open(): void { $this->openCount++; $this->isOpen = true; }
+            public function send(string $data): ?string
+            {
+                if (!$this->isOpen) {
+                    $this->sentWhileClosed[] = $data;
+                }
+                if (str_starts_with($data, 'AUTH ')) {
+                    return '200 SESSIONKEY LOGIN ACCEPTED';
+                }
+                if (str_starts_with($data, 'LOGOUT ')) {
+                    return '203 LOGGED OUT';
+                }
+                return null;
+            }
+            public function close(): void { $this->closeCount++; $this->isOpen = false; }
+            public function lastReplyHost(): ?string { return 'api.anidb.net'; }
+            public function lastReplyPort(): ?int { return 9000; }
+        };
+        $waiter = new class implements WaiterInterface {
+            public function wait(float $seconds): void {}
+        };
+        $udpSession = new UdpClient(
+            ['username' => 'testuser', 'api_key' => 'testkey'],
+            $transport,
+            $waiter,
+        );
+
+        $provider = new AnidbMetadataProvider(
+            ['username' => 'testuser', 'api_key' => 'testkey', 'use_title_dump' => false, 'title_dump_url' => 'http://example.com/anime-titles.dat.gz'],
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            $udpSession,
+        );
+        $container = new class implements \Psr\Container\ContainerInterface {
+            public function get(string $id): mixed { throw new \RuntimeException('no services: ' . $id); }
+            public function has(string $id): bool { return false; }
+        };
+
+        $provider->onEnable($container);
+        $provider->resolveAidByTitle('Test');
+        $this->assertSame(1, $transport->openCount, 'first lookup opens the transport');
+
+        $provider->onDisable();
+        $this->assertSame(1, $transport->closeCount);
+        $this->assertFalse($transport->isOpen);
+
+        $provider->onEnable($container);
+        $this->assertSame(1, $transport->openCount, 'onEnable() stays wiring-only: no open() at enable time');
+
+        $provider->resolveAidByTitle('Test');
+        $this->assertSame(2, $transport->openCount, 'the first lookup after re-enable must re-open the transport');
+        $this->assertTrue($transport->isOpen);
+        $this->assertSame([], $transport->sentWhileClosed, 'no packet may be sent into a closed transport');
     }
 
     public function test_search_returns_array_with_id_and_title(): void

@@ -470,6 +470,19 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
             $lines[0],
             'the notice does not render the blocked marker path in full — a basename is not actionable',
         );
+        // ...and the exemption stops there (M-ANIDB-19 negative pin): the
+        // symlink target and the cache directory keep the redacted default
+        // without PHLIX_ANIDB_DEBUG.
+        $this->assertStringNotContainsString(
+            '"' . $dir . '/somewhere-else"',
+            $lines[0],
+            'the symlink target is rendered in full without PHLIX_ANIDB_DEBUG',
+        );
+        $this->assertStringNotContainsString(
+            '"' . $dir . '"',
+            $lines[0],
+            'the cache directory is rendered in full without PHLIX_ANIDB_DEBUG',
+        );
         $this->assertStringContainsString(
             $expectedDescription,
             $lines[0],

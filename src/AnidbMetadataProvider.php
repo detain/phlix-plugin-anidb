@@ -164,7 +164,8 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      * onEnable() only performs the cheap "wire" step (register source, no I/O).
      * The first actual lookup triggers {@see ensureConnected()} — opening the
      * UDP socket and scheduling the (non-blocking) title-dump download. This
-     * guard ensures that only happens once and NEVER at boot (item-5c3).
+     * guard ensures that only happens once per enable cycle and NEVER at boot
+     * (item-5c3); {@see onDisable()} resets it alongside close().
      */
     private bool $connected = false;
 
@@ -749,11 +750,18 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      *
      * Sends LOGOUT, closes the UDP socket, and cleans up.
      *
+     * Also resets the lazy-connect guard: the socket this provider opened is
+     * gone, so the next lookup after a disable→enable cycle MUST run
+     * {@see ensureConnected()} again and re-open() it. Leaving `connected`
+     * stuck at true poisoned the provider — every later lookup skipped
+     * open() and sent into a closed transport (review ANI-3).
+     *
      * @return void
      */
     public function onDisable(): void
     {
         $this->udpSession->close();
+        $this->connected = false;
     }
 
     /**

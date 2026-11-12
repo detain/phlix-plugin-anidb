@@ -17,6 +17,13 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- `AnidbMetadataProvider::onDisable()` now resets the lazy-connect guard
+  alongside closing the UDP session (ANI-S6, review ANI-3). It used to close
+  the socket but leave `connected` true, so after a disable→enable cycle in
+  the same process every lookup skipped `ensureConnected()`'s `open()` and
+  sent into a closed transport, leaving the provider poisoned until restart.
+  The first lookup after re-enable now re-opens the transport, and
+  `onEnable()` stays wiring-only.
 - The title-dump `STALLED` notice (in-flight marker path blocked by a
   directory or symlink) no longer ends in a copy-paste `rm -rf "<basename>"`
   that could not be acted on (ANI-S5, review ANI-4): under the M-ANIDB-19

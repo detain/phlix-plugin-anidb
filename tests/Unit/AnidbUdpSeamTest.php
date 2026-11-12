@@ -26,6 +26,8 @@ use PHPUnit\Framework\TestCase;
  */
 final class AnidbUdpSeamTest extends TestCase
 {
+    use SessionKeyProbe;
+
     /**
      * Build a UdpClient wired to the supplied fake transport and waiter.
      */
@@ -49,7 +51,7 @@ final class AnidbUdpSeamTest extends TestCase
         $client = $this->makeUdpClient($udp, $waiter);
         $client->authenticate();
 
-        $this->assertSame('sEsSiOnKeY', $client->getSessionKey());
+        $this->assertSame('sEsSiOnKeY', $this->sessionKeyOf($client));
         $this->assertTrue($client->isAuthenticated());
 
         // AUTH command sent (no session key on first send).
@@ -85,7 +87,7 @@ final class AnidbUdpSeamTest extends TestCase
         $this->assertStringContainsString($expectedMessageFragment, $thrown->getMessage());
 
         // No session key should be set on a failed AUTH.
-        $this->assertNull($client->getSessionKey());
+        $this->assertNull($this->sessionKeyOf($client));
         $this->assertFalse($client->isAuthenticated());
     }
 
@@ -179,7 +181,7 @@ final class AnidbUdpSeamTest extends TestCase
         $client->logout();
 
         $this->assertFalse($client->isAuthenticated());
-        $this->assertNull($client->getSessionKey());
+        $this->assertNull($this->sessionKeyOf($client));
     }
 
     /**
@@ -259,7 +261,7 @@ final class AnidbUdpSeamTest extends TestCase
         $client->logout();
 
         $this->assertFalse($client->isAuthenticated());
-        $this->assertNull($client->getSessionKey());
+        $this->assertNull($this->sessionKeyOf($client));
         $this->assertCount(0, $udp->sent);
     }
 
@@ -275,7 +277,7 @@ final class AnidbUdpSeamTest extends TestCase
         $client->authenticate();
 
         $this->assertTrue($client->isAuthenticated());
-        $this->assertNotNull($client->getSessionKey());
+        $this->assertNotNull($this->sessionKeyOf($client));
     }
 
     public function test_get_session_key_returns_null_when_not_authenticated(): void
@@ -285,7 +287,7 @@ final class AnidbUdpSeamTest extends TestCase
 
         $client = $this->makeUdpClient($udp, $waiter);
 
-        $this->assertNull($client->getSessionKey());
+        $this->assertNull($this->sessionKeyOf($client));
     }
 
     public function test_ping_sends_when_session_active(): void

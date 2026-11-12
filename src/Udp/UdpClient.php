@@ -669,14 +669,4 @@ final class UdpClient
     {
         return $this->sessionKey !== null;
     }
-
-    /**
-     * Get the current session key (for testing).
-     *
-     * @return string|null
-     */
-    public function getSessionKey(): ?string
-    {
-        return $this->sessionKey;
-    }
 }

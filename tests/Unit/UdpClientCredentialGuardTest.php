@@ -28,6 +28,8 @@ use PHPUnit\Framework\TestCase;
  */
 final class UdpClientCredentialGuardTest extends TestCase
 {
+    use SessionKeyProbe;
+
     /**
      * The guard names the settings by their exact settings-form labels
      * (plugin.json `label`), so an operator can find the field verbatim.
@@ -74,7 +76,7 @@ final class UdpClientCredentialGuardTest extends TestCase
         $this->assertStringContainsString(self::GUARD_STEM, $thrown->getMessage());
         $this->assertSame([], $transport->sent, 'a malformed AUTH datagram reached the transport');
         $this->assertSame(0, $transport->openCount);
-        $this->assertNull($client->getSessionKey());
+        $this->assertNull($this->sessionKeyOf($client));
     }
 
     /**
@@ -157,7 +159,7 @@ final class UdpClientCredentialGuardTest extends TestCase
 
         $this->assertCount(1, $transport->sent);
         $this->assertStringStartsWith('AUTH user=user&pass=key', $transport->sent[0]);
-        $this->assertSame('SESSIONKEY', $client->getSessionKey());
+        $this->assertSame('SESSIONKEY', $this->sessionKeyOf($client));
     }
 }
 

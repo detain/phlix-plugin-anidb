@@ -23,6 +23,8 @@ use PHPUnit\Framework\TestCase;
 
 final class AnidbFloodIntervalTest extends TestCase
 {
+    use SessionKeyProbe;
+
     /**
      * The class-under-test's flood interval, read from the private constant
      * so the expectations below never drift from the production value.
@@ -107,7 +109,7 @@ final class AnidbFloodIntervalTest extends TestCase
         $result = $client->sendCommand('ANIME aid=1');
 
         $this->assertSame('230 ANIME ok', $result);
-        $this->assertSame('K2', $client->getSessionKey());
+        $this->assertSame('K2', $this->sessionKeyOf($client));
 
         $firstCommand = $timeline->indexOfSend('ANIME aid=1');
         $reauthAuth = $timeline->indexOfSend('AUTH', $firstCommand);

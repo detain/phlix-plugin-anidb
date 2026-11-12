@@ -17,6 +17,14 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- The 504 and 555 AUTH-failure messages no longer embed the raw datagram
+  tail (ANI-S7, review ANI-17): like the generic arm, they now pass the
+  server detail through the M-ANIDB-29 scrubber (session keys redacted,
+  whitespace collapsed, length bounded), and a reply with no detail yields
+  the bare label with no dangling `—`. The 504 text now reads `this client
+  version is banned (your account is not) — <detail>` (review ANI-24), so an
+  operator does not chase an account ban that does not exist. Log matchers
+  keyed on `client version banned` need updating.
 - `AnidbMetadataProvider::onDisable()` now resets the lazy-connect guard
   alongside closing the UDP session (ANI-S6, review ANI-3). It used to close
   the socket but leave `connected` true, so after a disable→enable cycle in

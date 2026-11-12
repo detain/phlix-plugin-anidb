@@ -97,7 +97,7 @@ final class AnidbUdpSeamTest extends TestCase
         return [
             '500 invalid credentials' => ['500 LOGIN FAILED', 'invalid username or API password'],
             '503 outdated client'     => ['503 CLIENT VERSION OUTDATED', 'client version outdated'],
-            '504 client banned'       => ['504 CLIENT BANNED - flooding', 'client version banned'],
+            '504 client banned'       => ['504 CLIENT BANNED - flooding', 'this client version is banned (your account is not)'],
             '555 banned'              => ['555 BANNED - too many failed logins', 'temporarily banned'],
             'unknown code raw'        => ['600 INTERNAL SERVER ERROR', 'AniDB AUTH failed: 600 INTERNAL SERVER ERROR'],
         ];
@@ -474,7 +474,13 @@ final class AnidbUdpSeamTest extends TestCase
 
         $exception = $client->parseAuthFailure('504 CLIENT BANNED - flooding');
         $this->assertInstanceOf(\RuntimeException::class, $exception);
-        $this->assertStringContainsString('client version banned', $exception->getMessage());
+        // ANI-S7 (review ANI-24): 504 bans the client software, not the
+        // user — the message says so, so an operator does not chase a
+        // non-existent account ban.
+        $this->assertSame(
+            'AniDB AUTH failed: this client version is banned (your account is not) — CLIENT BANNED - flooding',
+            $exception->getMessage()
+        );
     }
 
     public function test_parse_auth_failure_555(): void
@@ -486,7 +492,10 @@ final class AnidbUdpSeamTest extends TestCase
 
         $exception = $client->parseAuthFailure('555 BANNED - too many failed logins');
         $this->assertInstanceOf(\RuntimeException::class, $exception);
-        $this->assertStringContainsString('temporarily banned', $exception->getMessage());
+        $this->assertSame(
+            'AniDB AUTH failed: temporarily banned — BANNED - too many failed logins',
+            $exception->getMessage()
+        );
     }
 
     public function test_parse_auth_failure_unknown(): void
@@ -541,6 +550,73 @@ final class AnidbUdpSeamTest extends TestCase
             strlen('AniDB AUTH failed: ') + 120 + strlen('…'),
             strlen($message)
         );
+    }
+
+    // ------------------------------------------------------------------
+    // ANI-S7 (review ANI-17): the 504/555 arms embedded the raw datagram
+    // tail, bypassing the M-ANIDB-29 scrubber. Every AUTH-failure arm that
+    // echoes server bytes now goes through scrubAuthFailureBody().
+    // ------------------------------------------------------------------
+
+    /**
+     * @return array<string, array{string, string}>
+     */
+    public static function banArmProvider(): array
+    {
+        return [
+            '504 client version banned' => ['504', 'AniDB AUTH failed: this client version is banned (your account is not)'],
+            '555 temporarily banned'    => ['555', 'AniDB AUTH failed: temporarily banned'],
+        ];
+    }
+
+    /**
+     * @dataProvider banArmProvider
+     */
+    public function test_parse_auth_failure_ban_arm_redacts_session_key_and_collapses_whitespace(
+        string $code,
+        string $label
+    ): void {
+        $client = $this->makeUdpClient(new FakeUdpClient([]), new NoOpWaiter());
+
+        $exception = $client->parseAuthFailure(
+            $code . " BANNED\n201 SUPERSECRETSESSIONKEY LOGIN ACCEPTED\textra noise"
+        );
+
+        $this->assertSame(
+            $label . ' — BANNED 201 [session-key-redacted] LOGIN ACCEPTED extra noise',
+            $exception->getMessage()
+        );
+    }
+
+    /**
+     * @dataProvider banArmProvider
+     */
+    public function test_parse_auth_failure_ban_arm_bounds_oversized_detail(string $code, string $label): void
+    {
+        $client = $this->makeUdpClient(new FakeUdpClient([]), new NoOpWaiter());
+
+        $exception = $client->parseAuthFailure($code . ' BANNED ' . str_repeat('x', 500));
+        $message = $exception->getMessage();
+
+        $this->assertStringStartsWith($label . ' — BANNED ', $message);
+        $this->assertStringEndsWith('…', $message);
+        $this->assertSame(
+            strlen($label . ' — ') + 120 + strlen('…'),
+            strlen($message)
+        );
+    }
+
+    /**
+     * @dataProvider banArmProvider
+     */
+    public function test_parse_auth_failure_ban_arm_without_detail_has_no_dangling_separator(
+        string $code,
+        string $label
+    ): void {
+        $client = $this->makeUdpClient(new FakeUdpClient([]), new NoOpWaiter());
+
+        $this->assertSame($label, $client->parseAuthFailure($code)->getMessage());
+        $this->assertSame($label, $client->parseAuthFailure($code . "  \n ")->getMessage());
     }
 }
 

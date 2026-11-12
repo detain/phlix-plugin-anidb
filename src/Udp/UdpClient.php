@@ -419,7 +419,13 @@ final class UdpClient
      * client software is banned — NOT the user account), 555 BANNED (a
      * temporary ban; the code exists to tell developers what they are doing
      * wrong — typically API misuse such as flooding). Labels below keep the
-     * two bans distinguishable at a glance in logs.
+     * two bans distinguishable at a glance in logs, and the 504 label says
+     * outright that the user's account is not the thing that is banned.
+     *
+     * Every arm that echoes server bytes (504, 555 and the generic arm)
+     * routes them through scrubAuthFailureBody() — session keys redacted,
+     * whitespace collapsed, length bounded (M-ANIDB-29) — so no datagram
+     * reaches an exception message raw.
      *
      * @param string $response Raw response string.
      *
@@ -434,13 +440,31 @@ final class UdpClient
             return new \RuntimeException('AniDB AUTH failed: client version outdated');
         }
         if (str_starts_with($response, '504')) {
-            return new \RuntimeException('AniDB AUTH failed: client version banned — ' . substr($response, 4));
+            return new \RuntimeException(self::withScrubbedDetail(
+                'AniDB AUTH failed: this client version is banned (your account is not)',
+                substr($response, 3)
+            ));
         }
         if (str_starts_with($response, '555')) {
-            return new \RuntimeException('AniDB AUTH failed: temporarily banned — ' . substr($response, 4));
+            return new \RuntimeException(self::withScrubbedDetail(
+                'AniDB AUTH failed: temporarily banned',
+                substr($response, 3)
+            ));
         }
 
         return new \RuntimeException('AniDB AUTH failed: ' . self::scrubAuthFailureBody($response));
+    }
+
+    /**
+     * Append the scrubbed server detail to a ban label as "<label> — <detail>",
+     * or return the bare label when the reply carried no detail (no dangling
+     * separator).
+     */
+    private static function withScrubbedDetail(string $label, string $detail): string
+    {
+        $scrubbed = self::scrubAuthFailureBody($detail);
+
+        return $scrubbed === '' ? $label : $label . ' — ' . $scrubbed;
     }
 
     /**
@@ -453,7 +477,7 @@ final class UdpClient
      */
     private static function scrubAuthFailureBody(string $response): string
     {
-        $collapsed = (string) preg_replace('/\s+/u', ' ', $response);
+        $collapsed = trim((string) preg_replace('/\s+/u', ' ', $response));
         $scrubbed = (string) preg_replace('/\b(200|201)\s+\S+/', '$1 [session-key-redacted]', $collapsed);
 
         if (strlen($scrubbed) > self::AUTH_FAILURE_BODY_MAX) {

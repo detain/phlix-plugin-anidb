@@ -66,21 +66,11 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      */
     private const DEFAULT_ANIME_MASK = '00f0f0f0000000';
 
-    /**
-     * AniDB UDP API server hostname.
-     */
     /** Seconds a memoised fetchAnimeMetadata() result is served (resident-worker staleness bound). */
     private const METADATA_MEMO_TTL_SECONDS = 60;
 
     /** Upper bound on memoised AIDs; the memo is flushed when reached. */
     private const METADATA_MEMO_MAX_ENTRIES = 256;
-
-    private const API_HOST = 'api.anidb.net';
-
-    /**
-     * AniDB UDP API server port.
-     */
-    private const API_PORT = 9000;
 
     /**
      * AniDB image CDN base URL for anime posters (picname is appended).
@@ -287,8 +277,8 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         $this->settings['title_dump_url'] = $effectiveDumpUrl;
         $this->cacheDir = $this->resolveCacheDir($settings, $cacheDir);
         $this->udpClient = $udpClient ?? new SocketUdpClient(
-            self::API_HOST,
-            self::API_PORT,
+            UdpClient::API_HOST,
+            UdpClient::API_PORT,
         );
         $this->waiter = $waiter ?? new ProductionWaiter();
         $this->animeParser = $animeParser ?? new AnimeResponseParser();

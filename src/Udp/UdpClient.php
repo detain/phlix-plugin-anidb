@@ -50,14 +50,16 @@ final class UdpClient
     private const PING_INTERVAL_SEC = 30 * 60;
 
     /**
-     * AniDB UDP API server hostname.
+     * AniDB UDP API server hostname — the single source of truth: the transport
+     * dial (SocketUdpClient defaults, provider wiring) and reply-origin
+     * validation both consume it, so a one-sided edit cannot desync them.
      */
-    private const API_HOST = 'api.anidb.net';
+    public const API_HOST = 'api.anidb.net';
 
     /**
      * AniDB UDP API server port.
      */
-    private const API_PORT = 9000;
+    public const API_PORT = 9000;
 
     /**
      * Max bytes of an unexpected AUTH-failure body kept in an exception.

@@ -116,8 +116,8 @@ final class SocketUdpClient implements UdpClientInterface
      *                          open() slides forward across a small window if it is taken.
      */
     public function __construct(
-        string $host = 'api.anidb.net',
-        int $port = 9000,
+        string $host = UdpClient::API_HOST,
+        int $port = UdpClient::API_PORT,
         int $localPort = 9001
     ) {
         $this->host = $host;

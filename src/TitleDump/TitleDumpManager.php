@@ -445,7 +445,14 @@ final class TitleDumpManager
     public function ensureCacheDir(): void
     {
         if (!is_dir($this->cacheDir)) {
-            mkdir($this->cacheDir, 0755, true);
+            // Race-safe create-if-absent (same deliberate `@mkdir` idiom as
+            // TitleDumpIndexer): a concurrent worker can win the create and
+            // the loser's "File exists" warning is pure noise. Only a path
+            // that is STILL not a directory afterwards is a real failure.
+            @mkdir($this->cacheDir, 0755, true);
+            if (!is_dir($this->cacheDir)) {
+                error_log('Phlix AniDB: title cache directory could not be created.');
+            }
         }
 
         // Kick the first (deferred) download at the first lookup — boot and

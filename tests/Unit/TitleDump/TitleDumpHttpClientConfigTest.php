@@ -77,7 +77,7 @@ final class TitleDumpHttpClientConfigTest extends TestCase
 
         $this->assertSame(TitleDumpIndexer::HTTP_TIMEOUT_SECONDS, $config['timeout']);
         // Cleartext URLs are still verified config-shape-wise; the scheme
-        // itself is policy-checked elsewhere (M-ANIDB-10 fetch warning +
+        // itself is policy-checked elsewhere (ANI-S9 default-deny refusal in doDownloadAndIndex() +
         // constructor scheme refusal).
         $this->assertTrue($config['context']['ssl']['verify_peer']);
     }

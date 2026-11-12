@@ -109,10 +109,13 @@ resident Workerman worker.
 
 ### Protocol & credential posture
 
-The AUTH command carries your AniDB username and UDP API Key in a **cleartext
-UDP datagram** — the AniDB UDP API has no TLS/encrypted transport and no TCP
-alternative exists for it. This is protocol-inherent, not a Phlix shortcut: any
-party on the network path between the Phlix server and `api.anidb.net:9000`
+The AniDB UDP API has no TLS/encrypted transport and no TCP alternative. The
+client supports the md5 challenge form of AUTH (`auth=md5(challenge + key)`,
+protover 3), so the API Key need not travel in the clear **when the server issues
+a challenge**; the initial AUTH datagram still carries `pass=` in a **cleartext
+UDP datagram** until the challenge wire form is confirmed by a live capture
+(owner-gated). Cleartext is the optional fallback, not an inherent property of
+the client. Until then, any party on the network path between the Phlix server and `api.anidb.net:9000`
 could read those bytes. Mitigations, in order of importance:
 
 - Use a **dedicated AniDB account** for Phlix, never your personal one.

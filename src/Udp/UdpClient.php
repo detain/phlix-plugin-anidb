@@ -300,11 +300,12 @@ final class UdpClient
      * re-auth the AUTH datagram waits its turn behind the command that just
      * expired the session.
      *
-     * Posture note: the AniDB UDP API has no encrypted transport — the
-     * username and API password travel in a cleartext datagram. This is
-     * protocol-inherent (there is no TCP/TLS alternative); operators should
-     * use a dedicated AniDB account whose API password differs from the
-     * site login password. See README ("Protocol & credential posture").
+     * Posture note: the AniDB UDP API has no encrypted transport. The first
+     * datagram still carries pass= (cleartext) until the md5 challenge wire
+     * form is captured; when the server answers with a challenge the client
+     * replies with auth=md5(challenge.password) instead. Operators should use
+     * a dedicated AniDB account whose API password differs from the site
+     * login password. See README ("Protocol & credential posture").
      *
      * @return void
      *
@@ -325,6 +326,23 @@ final class UdpClient
 
         if ($response === null) {
             throw new \RuntimeException('AniDB AUTH: no response (timeout or network failure)');
+        }
+
+        // md5 challenge leg (ANI-S21): a "201 <challenge> CHALLENGE" reply is
+        // answered with auth=md5(challenge . api_key) — the API password never
+        // travels in the clear on this leg. A genuine "201 <key> LOGIN ACCEPTED
+        // - NEW VERSION AVAILABLE" does not carry the CHALLENGE token and falls
+        // through to the session parse below. The exact wire form of the
+        // challenge reply is owner-gated (capture budget shared with S19/S20).
+        if (preg_match('/^201\s+(\S+)\s+CHALLENGE\b/', $response, $chal)) {
+            $response = $this->udpSend(sprintf(
+                'AUTH user=%s&auth=%s&protover=3&client=phlix&clientver=1',
+                urlencode($this->settings['username']),
+                md5($chal[1] . $this->settings['api_key'])
+            ));
+            if ($response === null) {
+                throw new \RuntimeException('AniDB AUTH: no response to challenge answer (timeout or network failure)');
+            }
         }
 
         // Parse: "200 SESSION_KEY LOGIN ACCEPTED" or "201 SESSION_KEY ..."

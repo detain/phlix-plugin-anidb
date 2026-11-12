@@ -86,9 +86,9 @@ final class TitleDumpIndexer
      * Explicit opt-in env for a cleartext (`http://`) title_dump_url (ANI-S9).
      *
      * The dump is the integrity source for every worker's title→AID index and
-     * an HTTP leg has no certificate to verify, so a non-https URL is REFUSED
-     * by default. An operator whose mirror genuinely has no https sets this to
-     * exactly `1` to keep fetching it — every such attempt still logs the loud
+     * an HTTP leg has no certificate to verify, so a non-HTTPS URL is REFUSED
+     * by default. An operator whose mirror genuinely has no HTTPS sets this to
+     * exactly `1` to keep fetching it — every such attempt still logs the
      * cleartext warning. Any other value (`0`, `true`, `yes`, padded) is not
      * an opt-in.
      */

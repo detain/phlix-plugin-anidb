@@ -138,9 +138,9 @@ certificate to verify, so anyone on the network path could serve a forged dump.
 A non-HTTPS `title_dump_url` is therefore **refused**: each download attempt
 logs `TitleDumpIndexer: REFUSING download — title_dump_url uses cleartext HTTP
 (http://<host>)` and contacts nothing, and the previously cached index (if any)
-keeps serving. If your mirror genuinely has no https, set the environment
+keeps serving. If your mirror genuinely has no HTTPS, set the environment
 variable `PHLIX_ANIDB_ALLOW_HTTP_DUMP_MIRROR=1` (exactly `1`) for the Phlix
-server process; the fetch then proceeds and logs a loud cleartext warning on
+server process; the fetch then proceeds and logs a cleartext warning on
 every attempt. Redirects are never followed, so an https URL cannot be walked
 down to http by a 301 either way.
 

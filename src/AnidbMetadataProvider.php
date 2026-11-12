@@ -43,8 +43,8 @@ use Psr\Container\ContainerInterface;
  * - username: AniDB username (required)
  * - api_key: AniDB API password from profile (required, secret)
  * - use_title_dump: whether to download/use title dump (default: true)
- * - title_dump_url: URL to anime-titles.dat.gz (default: AniDB official, https —
- *   a stored plain-http AniDB URL is migrated by {@see TitleDumpUrlMigration})
+ * - title_dump_url: URL to anime-titles.dat.gz (default: AniDB official, HTTPS —
+ *   a stored plain-HTTP AniDB URL is migrated by {@see TitleDumpUrlMigration})
  * - cache_dir: writable directory for the title-dump index (optional; unset
  *   falls back to env PHLIX_ANIDB_CACHE_DIR, then sys_get_temp_dir()/phlix-plugin-anidb)
  *
@@ -433,6 +433,9 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         $this->connected = true;
     }
 
+    /** @var string Test seam: overrides sys_get_temp_dir() for the fallback (PHP caches the real one). */
+    private string $fallbackTempBase = '';
+
     /**
      * Resolve a WRITABLE cache directory for the title-dump index.
      *
@@ -475,7 +478,14 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
             return $this->requireAbsoluteCacheDir($fromEnv, 'the PHLIX_ANIDB_CACHE_DIR environment variable');
         }
 
-        return sys_get_temp_dir() . '/phlix-plugin-anidb';
+        // ANI-S12: the shared-temp fallback sits in a world-writable parent, so
+        // a local user can pre-create the leaf. Run it through the same choke
+        // point as every other route, plus an ownership/symlink refusal.
+        return $this->requireAbsoluteCacheDir(
+            ($this->fallbackTempBase !== '' ? $this->fallbackTempBase : sys_get_temp_dir()) . '/phlix-plugin-anidb',
+            'the default sys_get_temp_dir() fallback cache directory',
+            true,
+        );
     }
 
     /**
@@ -501,18 +511,30 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      *
      * @param string $candidate Configured cache directory (non-empty).
      * @param string $source    Human name of the configuration source.
+     * @param bool   $requireOwned When true (the shared-temp fallback), a symlink
+     *     at the path or an existing directory not owned by the effective uid
+     *     is refused too: a pre-created hostile leaf in a shared parent is the
+     *     dangling-symlink + fopen('x') creation primitive (ANI-S12).
      *
      * @return string Absolute cache directory (canonicalized when it exists).
      *
      * @throws \InvalidArgumentException If the candidate is not an absolute
      *     path, or an existing one carries the other-write bit.
      */
-    private function requireAbsoluteCacheDir(string $candidate, string $source): string
+    private function requireAbsoluteCacheDir(string $candidate, string $source, bool $requireOwned = false): string
     {
         if (!str_starts_with($candidate, '/')) {
             throw new \InvalidArgumentException(
                 'AnidbMetadataProvider: ' . $source . ' must name an absolute directory '
                     . '(a relative path resolves against the worker CWD); got "' . $candidate . '".',
+            );
+        }
+
+        if ($requireOwned && is_link($candidate)) {
+            throw new \InvalidArgumentException(
+                'AnidbMetadataProvider: ' . $source . ' must not be a symlink (a planted link in a '
+                    . 'shared temp directory could redirect the index); got "' . $candidate . '". '
+                    . 'Set cache_dir or PHLIX_ANIDB_CACHE_DIR to a directory you own.',
             );
         }
 
@@ -536,6 +558,20 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
                     . 'could plant or swap it; the plugin.json cache_dir contract forbids the '
                     . 'other-write bit). Recover with `chmod o-w` on it; got "' . $candidate . '".',
             );
+        }
+
+        if ($requireOwned) {
+            $owner = @fileowner($resolved);
+            $euid = function_exists('posix_geteuid') ? posix_geteuid() : null;
+
+            if ($euid !== null && $owner !== false && $owner !== $euid) {
+                throw new \InvalidArgumentException(
+                    'AnidbMetadataProvider: ' . $source . ' exists but is owned by uid ' . $owner
+                        . ', not the effective uid ' . $euid . ' — another local user pre-created it; '
+                        . 'refusing. Set cache_dir or PHLIX_ANIDB_CACHE_DIR to a directory you own; got "'
+                        . $candidate . '".',
+                );
+            }
         }
 
         return $resolved;

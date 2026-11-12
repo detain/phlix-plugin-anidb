@@ -96,8 +96,9 @@ The "will anime ever be consumed?" question this document used to park is
   `Application.php` is gone (zero hits); the manager resolves as the container
   singleton (`MediaServicesProvider` binding), which is the same instance the
   plugin's `onEnable()` self-registration above registers against. The music
-  path (`MusicLibraryManager::` → `refreshItemMetadata()`) continues to drive
-  the container manager as before.
+  path (`MusicLibraryManager::enrichTrackMetadata()` →
+  `MetadataManager::refreshItemMetadata()`) continues to drive the container
+  manager as before.
 
 So an enabled anidb plugin participates in movie/series enrichment today via
 BOTH routes: the typed `MetadataSourceInterface` → `SourceRegistry` path

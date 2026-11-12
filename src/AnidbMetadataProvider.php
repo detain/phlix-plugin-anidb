@@ -52,7 +52,7 @@ use Psr\Container\ContainerInterface;
  *
  * AniDB uses UDP (not HTTP) on api.anidb.net:9000.
  * Flood protection: max 0.5 pkt/sec after first 5, min 4s between packets long-term.
- * Session timeout: 35 minutes. Keep alive with PING every ~30 min.
+ * Session timeout: 35 minutes. Keep-alive with PING every ~30 min.
  *
  * @see https://wiki.anidb.net/UDP_API_Definition
  * @package Phlix\Anidb

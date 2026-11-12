@@ -18,7 +18,7 @@ This plugin fetches structured anime metadata from [AniDB](https://anidb.net/) u
 - **Full metadata** — romaji/english/kanji titles, synonyms, year, type, rating (the `genres` key is always empty — AniDB category tags are not in the fetched response, see Protocol Notes)
 - **Description** — fetch long descriptions via separate ANIMEDESC command
 - **Flood protection** — 4-second rate limiting between API calls (per AniDB rules)
-- **Session management** — keepalive pings every 30 min, auto-reconnect on 506 SESSION EXPIRED
+- **Session management** — keep-alive pings every 30 min, auto-reconnect on 506 SESSION EXPIRED
 - **Episode info** — episode number parsed from the filename by `src/Parser/EpisodeExtractor.php` and returned as `episode_number`
 
 ## Install
@@ -103,7 +103,7 @@ resident Workerman worker.
 
 - **Protocol**: UDP (not HTTP) to `api.anidb.net:9000`
 - **Flood protection**: ≤ 0.5 packets/sec after first 5, minimum 4 seconds between packets
-- **Session**: valid 35 minutes; keep alive with PING every ~30 minutes
+- **Session**: valid 35 minutes; keep-alive with PING every ~30 minutes
 - **Flood ban**: reusing the same local UDP port is critical to avoid IP-level bans
 - **Field coverage**: the ANIME amask in use (`00f0f0f0000000`) returns titles, episode/date and rating fields only — AniDB's category/genre tags are not part of that response, so `genres` is structurally always empty (deriving real genres would additionally require vote/weight filtering over the tag cloud)
 

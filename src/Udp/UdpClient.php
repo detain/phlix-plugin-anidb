@@ -403,7 +403,7 @@ final class UdpClient
     }
 
     /**
-     * Check if the session needs a keepalive ping.
+     * Check if the session needs a keep-alive ping.
      *
      * @return bool True if ping should be sent.
      */

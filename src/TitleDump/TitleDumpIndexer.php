@@ -729,17 +729,24 @@ final class TitleDumpIndexer
 
         self::$refusalLogged = true;
 
+        // ANI-S5 (ANI-4): the marker path is this line's actionable payload —
+        // the one path the operator must delete — so it is rendered in FULL
+        // regardless of PHLIX_ANIDB_DEBUG; a scrubbed basename cannot be acted
+        // on. Every other path keeps the M-ANIDB-19 pathForLog() default. The
+        // line states the action, never a copy-paste destructive command: the
+        // operator picks the tool once they have looked at what is there.
         error_log(sprintf(
-            'TitleDumpIndexer: STALLED — the AniDB title-dump in-flight marker "%s" is %s, not a '
+            'TitleDumpIndexer: STALLED — the AniDB title-dump in-flight marker is %s, not a '
             . 'regular file, so no worker can ever claim it and the title dump will never update '
             . 'again. The cache directory "%s" itself is healthy, and nothing in Phlix creates this '
             . 'state (it takes an operator mkdir, a restore artifact or a planted symlink). Recover '
-            . 'with: rm -rf "%s" — plain `rm` refuses a directory. '
-            . '(Set PHLIX_ANIDB_DEBUG=1 to log full paths.) Logged once per process.',
-            self::pathForLog($marker),
+            . 'by deleting the blocker at "%s" (if it is a directory, remove it recursively); '
+            . 'nothing else in the cache directory needs touching. (That path is shown in full on '
+            . 'purpose; set PHLIX_ANIDB_DEBUG=1 to log the other paths in full.) Logged once per '
+            . 'process.',
             $this->describeMarkerType($type, $marker),
             self::pathForLog($this->cacheDir),
-            self::pathForLog($marker),
+            $marker,
         ));
     }
 

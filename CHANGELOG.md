@@ -17,6 +17,16 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Fixed
+- The title-dump `STALLED` notice (in-flight marker path blocked by a
+  directory or symlink) no longer ends in a copy-paste `rm -rf "<basename>"`
+  that could not be acted on (ANI-S5, review ANI-4): under the M-ANIDB-19
+  default the "command" named only `title_index.download.lock`, which is
+  wrong from any working directory but the cache dir. The line now states
+  the action — delete the blocker, recursively if it is a directory — and
+  renders that one marker path in full even without `PHLIX_ANIDB_DEBUG`,
+  because it is the line's actionable payload; the cache directory and a
+  symlink target stay basename-only by default. No destructive command text
+  is logged. Log matchers keyed on `Recover with: rm -rf` need updating.
 - The title-dump AID refusal notice now reads `REFUSING <n> dump lines
   whose AID column is malformed or out-of-range (ceiling <max>)` (ANI-S4,
   review ANI-26): the old wording quoted further down this section ("with

@@ -460,21 +460,32 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
             $lines[0],
             'the notice does not identify which cache directory is stalled',
         );
-        // M-ANIDB-19 law: the shared error log carries no absolute layout by default.
-        $this->assertStringNotContainsString(
-            $marker,
+        // ANI-S5 (ANI-4): the marker path IS the actionable payload of this one
+        // line — the operator has to delete exactly that path, and a scrubbed
+        // basename cannot be acted on. So, unlike every other notice under the
+        // M-ANIDB-19 default, it is rendered in full even without
+        // PHLIX_ANIDB_DEBUG. Only this payload is exempt; see below.
+        $this->assertStringContainsString(
+            '"' . $marker . '"',
             $lines[0],
-            'the notice embeds the full marker path without PHLIX_ANIDB_DEBUG',
+            'the notice does not render the blocked marker path in full — a basename is not actionable',
         );
         $this->assertStringContainsString(
             $expectedDescription,
             $lines[0],
             'the notice does not say what is actually sitting at the marker path',
         );
-        $this->assertStringContainsString(
+        // ANI-S5: no copy-paste destructive command in a shared log. The line
+        // states the action and the full path; the operator chooses the tool.
+        $this->assertStringNotContainsString(
             'rm -rf',
             $lines[0],
-            'the notice does not carry a recovery command that works — plain `rm` refuses a directory',
+            'the notice carries a copy-paste destructive command',
+        );
+        $this->assertStringContainsString(
+            'remove it recursively',
+            $lines[0],
+            'the notice does not say that a directory blocker needs recursive removal',
         );
         $this->assertSame(
             [],

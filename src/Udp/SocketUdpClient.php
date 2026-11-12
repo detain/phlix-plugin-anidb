@@ -229,6 +229,7 @@ final class SocketUdpClient implements UdpClientInterface
         // loop fixes both shapes without a pre-send drain: any stale framing
         // frame is consumed by the same loop that then waits for the result.
         $deadline = microtime(true) + self::RESPONSE_BUDGET_SECONDS;
+        $expected = self::expectedResultCodes($data);
 
         while (true) {
             $remaining = $deadline - microtime(true);
@@ -281,12 +282,67 @@ final class SocketUdpClient implements UdpClientInterface
                 continue;
             }
 
+            if (self::isStaleResultFrame($frame, $expected)) {
+                // A 2xx RESULT frame that cannot answer the pending command
+                // (e.g. a left-over multi-entry 231 continuation of the
+                // previous ANIME when ANIMEDESC is pending). Drained inside
+                // the same bounded budget so one stale frame cannot shift
+                // every later reply by one (self-perpetuating desync).
+                // Whether the wire truth is drain or demux-by-session-key is
+                // decided by the credentialed multi-entry capture (owner-
+                // gated); this leg only drains frames provably not for the
+                // pending command and never asserts the 231 shape.
+                continue;
+            }
+
             // Capture the reply origin; UdpClient::isValidReplyOrigin() validates it.
             $this->lastReplyHost = $recvFrom !== '' ? $recvFrom : null;
             $this->lastReplyPort = $port !== 0 ? $port : null;
 
             return $frame;
         }
+    }
+
+    /**
+     * Success result codes the pending command may legitimately be answered
+     * with, or null when the verb is not in the conservative table (no
+     * draining then — behavior byte-identical to before). Error codes
+     * (3xx-5xx) are never in play: they always answer the pending command.
+     *
+     * ANIME keeps 231 in its set: a multi-entry reply may legitimately use
+     * it, and which side of that line a bare 231 falls on is exactly what
+     * the pending capture decides.
+     *
+     * @param string $command Raw command as sent (VERB args...).
+     *
+     * @return list<int>|null
+     */
+    public static function expectedResultCodes(string $command): ?array
+    {
+        $verb = strtoupper(strtok(ltrim($command), " \t\r\n") ?: '');
+
+        return match ($verb) {
+            'AUTH' => [200, 201],
+            'ANIME' => [230, 231],
+            'ANIMEDESC' => [233],
+            default => null,
+        };
+    }
+
+    /**
+     * Is this a 2xx result frame that cannot be the reply to the pending
+     * command? Only meaningful when the expected set is known.
+     *
+     * @param string         $frame    Trimmed datagram payload.
+     * @param list<int>|null $expected From {@see expectedResultCodes()}.
+     */
+    public static function isStaleResultFrame(string $frame, ?array $expected): bool
+    {
+        if ($expected === null || !preg_match('/^(2\d\d)[\s]/', $frame, $m)) {
+            return false;
+        }
+
+        return !in_array((int) $m[1], $expected, true);
     }
 
     /**

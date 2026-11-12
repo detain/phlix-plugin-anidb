@@ -295,6 +295,52 @@ final class SocketUdpClientTest extends TestCase
     /**
      * @requires extension sockets
      */
+    public function test_send_drains_stale_231_frame_when_animedesc_is_pending(): void
+    {
+        [$server, $client] = $this->loopbackPair(19511, 19431);
+
+        try {
+            $this->queueFromServer($server, $client, ["231 ANIME\n1|2", "233 ANIMEDESC\n0|0|text"]);
+
+            $reply = $client->send('ANIMEDESC aid=1&part=0&s=K');
+
+            $this->assertSame("233 ANIMEDESC\n0|0|text", $reply);
+        } finally {
+            $this->closePair($server, $client);
+        }
+    }
+
+    /**
+     * @requires extension sockets
+     */
+    public function test_send_never_drains_error_frames_or_unknown_verbs(): void
+    {
+        [$server, $client] = $this->loopbackPair(19512, 19441);
+
+        try {
+            $this->queueFromServer($server, $client, ['506 INVALID SESSION']);
+            $this->assertSame('506 INVALID SESSION', $client->send('ANIMEDESC aid=1&part=0&s=K'));
+
+            $this->queueFromServer($server, $client, ['231 X']);
+            $this->assertSame('231 X', $client->send('MYLIST s=K'));
+        } finally {
+            $this->closePair($server, $client);
+        }
+    }
+
+    public function test_expected_codes_and_stale_classification(): void
+    {
+        $this->assertSame([233], SocketUdpClient::expectedResultCodes('ANIMEDESC aid=1'));
+        $this->assertNull(SocketUdpClient::expectedResultCodes('MYLIST s=1'));
+        $this->assertTrue(SocketUdpClient::isStaleResultFrame('230 ANIME', [233]));
+        $this->assertFalse(SocketUdpClient::isStaleResultFrame('233 ANIMEDESC', [233]));
+        $this->assertFalse(SocketUdpClient::isStaleResultFrame('555 BANNED', [233]));
+        $this->assertFalse(SocketUdpClient::isStaleResultFrame('230 ANIME', null));
+    }
+
+    /**
+     * @requires extension sockets
+     */
     public function test_send_single_packet_result_is_returned_verbatim_as_before(): void {
         [$server, $client] = $this->loopbackPair(19503, 19421);
 

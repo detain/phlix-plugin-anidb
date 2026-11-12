@@ -941,6 +941,11 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      * the original package-private method signature for callers that were
      * already reaching sendCommand() directly within this class.
      *
+     * Reply/command pairing is enforced at the transport: stale 2xx result
+     * frames that cannot answer the pending verb are drained (see
+     * SocketUdpClient::expectedResultCodes()). Drain-vs-demux wording for a
+     * multi-entry ANIME 231 awaits the credentialed capture (owner-gated).
+     *
      * @param string $command   The command to send (without session key).
      * @param int    $retryCount Tracks recursion depth for 506 re-auth retries (max 3).
      *

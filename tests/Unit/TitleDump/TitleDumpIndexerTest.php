@@ -924,4 +924,24 @@ DAT;
         }
         rmdir($dir);
     }
+
+    public function test_parse_refuses_lines_over_the_byte_cap(): void
+    {
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
+        $huge = '1|main|en|' . str_repeat('A', TitleDumpIndexer::MAX_LINE_BYTES);
+        $result = $indexer->parse("2|main|en|Kept\n" . $huge . "\n3|main|en|AlsoKept\n");
+
+        $aids = array_column($result, 'aid');
+        $this->assertSame([2, 3], $aids);
+    }
+
+    public function test_parse_keeps_a_line_exactly_at_the_cap(): void
+    {
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
+        $prefix = '1|main|en|';
+        $line = $prefix . str_repeat('B', TitleDumpIndexer::MAX_LINE_BYTES - strlen($prefix));
+        $result = $indexer->parse($line);
+
+        $this->assertCount(1, $result);
+    }
 }

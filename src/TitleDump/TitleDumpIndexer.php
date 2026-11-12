@@ -68,6 +68,14 @@ final class TitleDumpIndexer
     public const MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024;
 
     /**
+     * Per-line byte cap at parse (ANI-21). A real dump line is well under
+     * 1 KiB; a hostile mirror can pack multi-megabyte titles into the
+     * decompressed ceiling and amplify memory across every worker. Lines over
+     * this are refused (counted, never logged verbatim).
+     */
+    public const MAX_LINE_BYTES = 4096;
+
+    /**
      * Wall-clock budget handed to the dump HTTP client, in seconds.
      */
     public const HTTP_TIMEOUT_SECONDS = 60;
@@ -1241,8 +1249,14 @@ final class TitleDumpIndexer
         $lines = explode("\n", trim($content));
         $grouped = [];
         $refusedAidLines = 0;
+        $refusedLongLines = 0;
 
         foreach ($lines as $line) {
+            if (strlen($line) > self::MAX_LINE_BYTES) {
+                ++$refusedLongLines;
+                continue;
+            }
+
             $line = trim($line);
             if ($line === '' || str_starts_with($line, '#')) {
                 continue;
@@ -1276,6 +1290,14 @@ final class TitleDumpIndexer
                 'type'  => $type,
                 'lang'  => $lang,
             ];
+        }
+
+        if ($refusedLongLines > 0) {
+            error_log(sprintf(
+                'TitleDumpIndexer: REFUSING %d dump lines longer than %d bytes.',
+                $refusedLongLines,
+                self::MAX_LINE_BYTES,
+            ));
         }
 
         if ($refusedAidLines > 0) {

@@ -27,6 +27,9 @@ namespace Phlix\Anidb\TitleDump;
  */
 final class TitleDumpManager
 {
+    /** Max bytes read from the cached title_index.json (ANI-21). */
+    public const MAX_INDEX_FILE_BYTES = 128 * 1024 * 1024;
+
     /**
      * Title dump index for fast offline search.
      *
@@ -255,7 +258,15 @@ final class TitleDumpManager
         $this->loadedIndexMtime = $readable ? $this->fileMtime($indexFile) : null;
 
         if ($readable) {
-            $data = file_get_contents($indexFile);
+            // ANI-21: bounded read — never slurp an unbounded cached file.
+            $data = file_get_contents($indexFile, false, null, 0, self::MAX_INDEX_FILE_BYTES + 1);
+            if ($data !== false && strlen($data) > self::MAX_INDEX_FILE_BYTES) {
+                error_log(sprintf(
+                    'TitleDumpManager: title_index.json exceeds %d bytes, falling back to empty index',
+                    self::MAX_INDEX_FILE_BYTES
+                ));
+                $data = false;
+            }
             if ($data !== false) {
                 /** @var mixed $decoded */
                 $decoded = json_decode($data, true);

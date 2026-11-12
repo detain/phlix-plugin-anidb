@@ -116,6 +116,28 @@ could read those bytes. Mitigations, in order of importance:
   host that the egress path to `api.anidb.net` is not shared with untrusted
   tenants.
 
+**Reply-origin check is an address allowlist, not authentication.** A UDP reply
+is accepted only if it comes from port 9000 on one of the resolved IPs of
+`api.anidb.net` (DNS is resolved again every hour). That drops stray and
+misrouted datagrams, but UDP does not authenticate source addresses, and AniDB
+does not sign its replies. Anyone on the network path, or anyone who can spoof
+AniDB's source IP and port and get the timing right, can still get a forged
+reply accepted. That reply could be fake metadata or a fake AUTH/session
+answer. The protocol cannot close this gap. The mitigation is the same trusted
+network path described above.
+
+**`title_dump_url` fetch reachability (deferred guard).** The server fetches
+whatever URL the `title_dump_url` setting names. The setting lives in the
+plugin settings form (advanced tier), so only an administrator can change it.
+Members cannot reach it. The fetched body is never shown to anyone. It is
+size-capped and thrown away unless it decompresses and parses as a valid title
+dump. Only refusal reasons and byte counts are logged. There is **no host
+allowlist and no private/loopback-range deny** on this URL today, so an
+administrator can point the fetch at an internal address and the server will
+send that request blind. This is accepted because only administrators can set
+the URL. **If `title_dump_url` ever becomes settable by members**, a host
+allowlist or a private-range deny must ship in the same change.
+
 See the [AniDB UDP API docs](https://wiki.anidb.net/UDP_API_Definition) for full details.
 
 ## Data Returned

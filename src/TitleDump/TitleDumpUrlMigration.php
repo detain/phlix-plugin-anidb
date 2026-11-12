@@ -34,9 +34,12 @@ namespace Phlix\Anidb\TitleDump;
  * Only AniDB's own hosts are rewritten (`anidb.net` and any `*.anidb.net`
  * subdomain), decided on the parsed URL **host** — never a substring match, so
  * `http://evil.example/anidb.net/x` is not touched. An operator-configured
- * third-party mirror keeps whatever scheme the operator set: some mirrors serve
- * plain http only, and silently rewriting them would break a working install to
- * fix one that is already broken.
+ * third-party mirror keeps whatever scheme the operator set: an arbitrary host
+ * is not known to serve the same path over https, so silently rewriting it
+ * could break a working install. Keeping the scheme is NOT accepting it: since
+ * ANI-S9 the indexer refuses to download any non-https URL unless the operator
+ * sets {@see TitleDumpIndexer::ALLOW_HTTP_DUMP_MIRROR_ENV}=1, so an http mirror
+ * that survives this migration is default-denied at fetch time, loudly.
  *
  * Pure string work — no I/O, no state, safe to call from a constructor in a
  * resident-memory worker.

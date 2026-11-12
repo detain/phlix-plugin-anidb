@@ -91,7 +91,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         // after which the freshness re-check in the callback absorbs any repeat
         // firings — real defence-in-depth, but it would hide the very defect
         // this test exists to catch. Failing keeps every firing visible.
-        $indexer = new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', static function (
+        $indexer = new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', static function (
             string $url,
             callable $onResult,
         ) use (&$fetches): void {
@@ -116,7 +116,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
 
         $dir = $this->makeTmpDir();
 
-        $indexer = new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', static function (
+        $indexer = new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', static function (
             string $url,
             callable $onResult,
         ): void {
@@ -140,7 +140,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
 
         $dir = $this->makeTmpDir();
 
-        $indexer = new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', static function (
+        $indexer = new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', static function (
             string $url,
             callable $onResult,
         ): void {
@@ -176,7 +176,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
 
         // Fetch FAILS, so no index file is ever written and the mtime freshness
         // guard can never mask the stacking we are measuring.
-        $indexer = new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', static function (
+        $indexer = new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', static function (
             string $url,
             callable $onResult,
         ) use (&$fetches): void {
@@ -210,9 +210,9 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         };
 
         Timer::$autoRun = false; // keep the first attempt "in flight"
-        (new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', $client))->downloadAndIndex();
-        (new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', $client))->downloadAndIndex();
-        (new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', $client))->downloadAndIndex();
+        (new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', $client))->downloadAndIndex();
+        (new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', $client))->downloadAndIndex();
+        (new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', $client))->downloadAndIndex();
 
         $this->assertCount(1, Timer::$registrations, 'a fresh indexer armed a second downloader');
 
@@ -249,7 +249,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
 
         for ($i = 0; $i < 50; ++$i) {
             $this->assertFalse(
-                (new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', $client))->downloadAndIndex(),
+                (new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', $client))->downloadAndIndex(),
                 'a refused download reported success',
             );
         }
@@ -284,7 +284,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         };
 
         for ($i = 0; $i < 50; ++$i) {
-            (new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', $client))->downloadAndIndex();
+            (new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', $client))->downloadAndIndex();
         }
 
         $this->assertFileExists($log, 'the guard refused silently — an operator cannot see why');
@@ -323,7 +323,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
             $onResult(null);
         };
 
-        (new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', $client))->downloadAndIndex();
+        (new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', $client))->downloadAndIndex();
 
         $lines = $this->refusalLines($log);
 
@@ -378,7 +378,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         $unusable = $this->makeUnusableCacheDir();
 
         $this->assertFalse(
-            (new TitleDumpIndexer($unusable, 'http://example.invalid/dump.gz', $client))->downloadAndIndex(),
+            (new TitleDumpIndexer($unusable, 'https://example.invalid/dump.gz', $client))->downloadAndIndex(),
             'a genuinely unusable cache dir stopped refusing',
         );
         $this->assertSame(0, $fetches, 'a download ran over a cache dir that can never hold the index');
@@ -395,7 +395,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         mkdir($dir . '/title_index.download.lock', 0755);
 
         $this->assertTrue(
-            (new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', $client))->downloadAndIndex(),
+            (new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', $client))->downloadAndIndex(),
             'losing the marker race was reported as an unusable cache directory',
         );
         $this->assertSame(0, $fetches, 'a second download started while another attempt owned the claim');
@@ -441,7 +441,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
 
         for ($i = 0; $i < 50; ++$i) {
             $this->assertTrue(
-                (new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', $client))->downloadAndIndex(),
+                (new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', $client))->downloadAndIndex(),
                 'a blocked marker path was reported as an unusable cache directory',
             );
         }
@@ -540,7 +540,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         // user including root.
         $dir = $this->makeTmpDir();
         $fetches = 0;
-        $indexer = new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', static function (
+        $indexer = new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', static function (
             string $url,
             callable $onResult,
         ) use (&$fetches): void {
@@ -578,7 +578,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         $dir = $this->makeTmpDir();
         $fetches = 0;
 
-        $indexer = new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', static function (
+        $indexer = new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', static function (
             string $url,
             callable $onResult,
         ) use (&$fetches): void {
@@ -609,7 +609,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         file_put_contents($dir . '/title_index.download.lock', '');
 
         $fetches = 0;
-        $indexer = new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', static function (
+        $indexer = new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', static function (
             string $url,
             callable $onResult,
         ) use (&$fetches): void {
@@ -635,7 +635,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         touch($marker, time() - (TitleDumpIndexer::IN_FLIGHT_TTL_SECONDS + 60));
 
         $fetches = 0;
-        $indexer = new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', static function (
+        $indexer = new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', static function (
             string $url,
             callable $onResult,
         ) use (&$fetches): void {
@@ -678,7 +678,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
             $onResult(null);
         };
 
-        $this->assertTrue((new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', $client))->downloadAndIndex());
+        $this->assertTrue((new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', $client))->downloadAndIndex());
         $this->assertSame(
             0,
             $fetches,
@@ -690,7 +690,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
         flock($lock, LOCK_UN);
         fclose($lock);
 
-        $this->assertFalse((new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', $client))->downloadAndIndex());
+        $this->assertFalse((new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', $client))->downloadAndIndex());
         $this->assertSame(1, $fetches, 'the stale marker stayed unreclaimable after the racer released it');
     }
 
@@ -716,7 +716,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
 
         // Five FRESH indexers, i.e. the ensureCacheDir() re-construction vector.
         for ($i = 0; $i < 5; ++$i) {
-            (new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', $client))->downloadAndIndex();
+            (new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', $client))->downloadAndIndex();
         }
 
         $this->assertSame(
@@ -739,7 +739,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
     {
         $dir = $this->makeTmpDir();
 
-        $indexer = new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', static function (
+        $indexer = new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', static function (
             string $url,
             callable $onResult,
         ): void {
@@ -758,7 +758,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
 
         // A fast-failing fetch (DNS error, instant 5xx) must NOT let the next
         // scheduling attempt start another download straight away.
-        $indexer = new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', static function (
+        $indexer = new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', static function (
             string $url,
             callable $onResult,
         ) use (&$fetches): void {
@@ -772,7 +772,7 @@ final class TitleDumpIndexerSchedulingTest extends TestCase
 
         // A brand-new indexer (the "provider re-constructed" vector) is held off
         // until the marker ages past IN_FLIGHT_TTL_SECONDS.
-        $retry = new TitleDumpIndexer($dir, 'http://example.invalid/dump.gz', static function (
+        $retry = new TitleDumpIndexer($dir, 'https://example.invalid/dump.gz', static function (
             string $url,
             callable $onResult,
         ) use (&$fetches): void {

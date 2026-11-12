@@ -104,7 +104,8 @@ final class TitleDumpManager
 
     /**
      * @param string                           $cacheDir     Directory for cached index file.
-     * @param string                           $titleDumpUrl URL to anime-titles.dat.gz.
+     * @param string                           $titleDumpUrl URL to anime-titles.dat.gz
+     *     (https; http only behind {@see TitleDumpIndexer::ALLOW_HTTP_DUMP_MIRROR_ENV}).
      * @param (callable(string,callable):void)|null $httpClient Transport seam for the indexer (tests).
      */
     public function __construct(string $cacheDir, string $titleDumpUrl, ?callable $httpClient = null)
@@ -284,8 +285,9 @@ final class TitleDumpManager
      *
      * Called from {@see search()}. Cost per window: one stat, plus — only
      * when stale — a downloadAndIndex() that short-circuits on a fresh file,
-     * a held in-flight marker, or a non-writable cache dir, so this can never
-     * become a per-lookup download storm. Between windows it is a single
+     * a held in-flight marker, or a non-writable cache dir (and, past the
+     * marker, refuses a cleartext URL without the ANI-S9 opt-in), so this can
+     * never become a per-lookup download storm. Between windows it is a single
      * integer comparison.
      *
      * @return void

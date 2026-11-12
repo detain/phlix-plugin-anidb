@@ -16,6 +16,28 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 
 ## [Unreleased] — 0.4.x development line
 
+### Changed
+- **Behavior change — a non-https `title_dump_url` is now refused by default**
+  (ANI-S9, review ANI-9). The title dump is the integrity source for every
+  worker's title→AID index, and a cleartext leg has no certificate to verify,
+  so an on-path attacker could serve a forged dump. The M-ANIDB-10 posture
+  only logged a loud warning and fetched anyway; each download attempt for an
+  `http://` URL now logs `TitleDumpIndexer: REFUSING download — title_dump_url
+  uses cleartext HTTP (http://<host>) …` (host only, never the full URL) and
+  fails without contacting the server. **Upgrade note:** an install whose
+  `title_dump_url` points at a plain-http third-party mirror stops refreshing
+  its offline title index until either the setting is changed to an https
+  mirror or the operator opts in by setting the environment variable
+  `PHLIX_ANIDB_ALLOW_HTTP_DUMP_MIRROR=1` (exactly `1`; `true`, `yes`, `0` and
+  padded values are not an opt-in) in the server's environment. With the
+  opt-in the fetch proceeds and still logs the loud cleartext warning on every
+  attempt. A stored `http://…anidb.net/…` URL is unaffected — it is still
+  migrated to https at plugin construction. The previously cached index keeps
+  serving searches while refreshes are refused. Pinned red-first in
+  `tests/Unit/TitleDump/TitleDumpCleartextPolicyTest.php` (refuse arm,
+  exact-value opt-in, opt-in arm, https untouched); indexer test fixtures that
+  exercise a successful fetch moved to https URLs.
+
 ### Fixed
 - The credential-guard and AUTH-500 messages now name the settings by their
   exact form labels (ANI-S8, review ANI-11). The guard used to say `username

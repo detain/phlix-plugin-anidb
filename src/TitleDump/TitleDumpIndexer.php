@@ -83,6 +83,18 @@ final class TitleDumpIndexer
     public const CA_BUNDLE_ENV = 'PHLIX_ANIDB_CA_BUNDLE';
 
     /**
+     * Explicit opt-in env for a cleartext (`http://`) title_dump_url (ANI-S9).
+     *
+     * The dump is the integrity source for every worker's title→AID index and
+     * an http leg has no certificate to verify, so a non-https URL is REFUSED
+     * by default. An operator whose mirror genuinely has no https sets this to
+     * exactly `1` to keep fetching it — every such attempt still logs the loud
+     * cleartext warning. Any other value (`0`, `true`, `yes`, padded) is not
+     * an opt-in.
+     */
+    public const ALLOW_HTTP_DUMP_MIRROR_ENV = 'PHLIX_ANIDB_ALLOW_HTTP_DUMP_MIRROR';
+
+    /**
      * Build the Workerman\Http\Client constructor options for the dump fetch.
      *
      * M-ANIDB-08 (review anidb__secaudit M1): the vendored pool creates every
@@ -285,7 +297,10 @@ final class TitleDumpIndexer
 
     /**
      * @param string      $cacheDir     Directory to store the index file.
-     * @param string      $titleDumpUrl http(s) URL to anime-titles.dat.gz.
+     * @param string      $titleDumpUrl http(s) URL to anime-titles.dat.gz. An
+     *     http URL constructs (the scheme guard below admits it) but every
+     *     download attempt is REFUSED unless {@see ALLOW_HTTP_DUMP_MIRROR_ENV}
+     *     is exactly `1` (ANI-S9).
      * @param callable|null $httpClient Injectable HTTP client. Defaults to a
      *     non-blocking Workerman\Http\Client wrapper. The callable receives (url, callback)
      *     where callback is invoked with raw gzipped bytes or null on failure.
@@ -1063,6 +1078,22 @@ final class TitleDumpIndexer
             $fetchResult = $body;
         };
 
+        if (!$this->schemeIsFetchable()) {
+            // ANI-S9: default-deny a cleartext integrity source. Named by host
+            // only (settings values can embed credentials); once per attempt,
+            // and the failed attempt keeps its in-flight marker, so the TTL
+            // retry floor bounds how often this line can repeat.
+            error_log(sprintf(
+                'TitleDumpIndexer: REFUSING download — title_dump_url uses cleartext HTTP (http://%s). '
+                . 'The dump feeds every worker\'s title index and an http leg has no certificate to verify. '
+                . 'Point title_dump_url at an https mirror, or set %s=1 if your mirror truly has no https.',
+                self::hostForLog($this->titleDumpUrl),
+                self::ALLOW_HTTP_DUMP_MIRROR_ENV,
+            ));
+
+            return false;
+        }
+
         $this->fetch($onFetched);
 
         if ($fetchResult === null) {
@@ -1302,24 +1333,60 @@ final class TitleDumpIndexer
      */
     private function fetch(callable $onResult): void
     {
-        // M-ANIDB-10: a cleartext dump download must be VISIBLE, not the
-        // silent default the docs warned away. plugin.json documents mirrors
-        // as "Must be https"; an operator still on http:// gets exactly one
-        // loud line per attempt naming the host (never the full URL —
-        // same rule as the scheme guard: settings values can embed
-        // credentials). Hard-refusal of http mirrors is deliberately NOT this
-        // lane's call: it would break the documented mirror path for
-        // operators whose mirror truly has no https (disclosed residual).
-        if (stripos($this->titleDumpUrl, 'https://') !== 0) {
-            $host = parse_url($this->titleDumpUrl, PHP_URL_HOST);
+        // M-ANIDB-10: a cleartext dump download must be VISIBLE. Since ANI-S9
+        // doDownloadAndIndex() refuses http:// before reaching here unless the
+        // operator set ALLOW_HTTP_DUMP_MIRROR_ENV=1, so this arm is the
+        // opted-in mirror path: still exactly one loud line per attempt
+        // naming the host (never the full URL — settings values can embed
+        // credentials). The warning sits at this seam so it fires for every
+        // transport, production client and injected fakes alike.
+        if (!self::isHttpsUrl($this->titleDumpUrl)) {
             error_log(
                 'TitleDumpIndexer: LOUD WARNING — title dump fetch over cleartext HTTP (http://'
-                . (is_string($host) ? $host : '(unparseable host)')
-                . ') — AniDB serves the dump over https and the plugin documents https mirrors.'
+                . self::hostForLog($this->titleDumpUrl)
+                . ') — allowed only because ' . self::ALLOW_HTTP_DUMP_MIRROR_ENV . '=1 is set; '
+                . 'AniDB serves the dump over https and the plugin documents https mirrors.'
             );
         }
 
         ($this->httpClient)($this->titleDumpUrl, $onResult);
+    }
+
+    /**
+     * Whether the configured URL may be fetched under the cleartext policy
+     * (ANI-S9): https always; http only behind the exact `1` opt-in.
+     */
+    private function schemeIsFetchable(): bool
+    {
+        return self::isHttpsUrl($this->titleDumpUrl) || self::httpDumpMirrorOptedIn();
+    }
+
+    /**
+     * Whether the operator explicitly opted in to a cleartext dump mirror —
+     * {@see ALLOW_HTTP_DUMP_MIRROR_ENV} set to exactly `1`. Read per attempt,
+     * so flipping the env takes effect on the next refresh.
+     */
+    public static function httpDumpMirrorOptedIn(): bool
+    {
+        return getenv(self::ALLOW_HTTP_DUMP_MIRROR_ENV) === '1';
+    }
+
+    /**
+     * Case-insensitive https scheme test on the raw URL.
+     */
+    private static function isHttpsUrl(string $url): bool
+    {
+        return stripos($url, 'https://') === 0;
+    }
+
+    /**
+     * The URL's host for a log line — never the path, query or userinfo.
+     */
+    private static function hostForLog(string $url): string
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+
+        return is_string($host) && $host !== '' ? $host : '(unparseable host)';
     }
 
     /**

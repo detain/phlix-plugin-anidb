@@ -55,7 +55,7 @@ DAT;
 
     public function test_parse_produces_grouped_index_with_correct_shape(): void
     {
-        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
         $result = $indexer->parse(self::FIXTURE_DAT);
 
         $this->assertIsArray($result);
@@ -85,7 +85,7 @@ DAT;
      */
     public function test_parse_persists_raw_fields_only_no_derived_keys(): void
     {
-        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
         $result = $indexer->parse(self::FIXTURE_DAT);
 
         foreach ($result as $entry) {
@@ -97,7 +97,7 @@ DAT;
 
     public function test_parse_skips_comment_lines(): void
     {
-        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
         $result = $indexer->parse("# comment line\n1|main|x-jat|Test\n# another comment\n");
 
         $this->assertCount(1, $result);
@@ -106,7 +106,7 @@ DAT;
 
     public function test_parse_skips_blank_lines(): void
     {
-        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
         $result = $indexer->parse("\n\n1|main|x-jat|Test\n\n\n2|main|x-jat|Test2\n");
 
         $this->assertCount(2, $result);
@@ -114,7 +114,7 @@ DAT;
 
     public function test_parse_skips_malformed_lines(): void
     {
-        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
         $result = $indexer->parse("1|main|x-jat|Valid\nmalformed\n1|only-two-parts\n2|main|x-jat|Also Valid\n");
 
         $this->assertCount(2, $result);
@@ -124,7 +124,7 @@ DAT;
 
     public function test_parse_skips_invalid_aid(): void
     {
-        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
         $result = $indexer->parse("0|main|x-jat|Invalid AID 0\n1|main|x-jat|Valid\n-1|main|x-jat|Negative AID\n");
 
         $this->assertCount(1, $result);
@@ -158,7 +158,7 @@ DAT;
      */
     public function test_parse_drops_aid_violating_the_shared_ceiling(string $aidColumn): void
     {
-        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
         $result = $indexer->parse("{$aidColumn}|main|x-jat|Violating\n7|main|x-jat|Valid\n");
 
         $this->assertCount(1, $result, 'only the in-range line may be indexed');
@@ -169,7 +169,7 @@ DAT;
     {
         // The ceiling is inclusive, mirroring AnimeResponseParser's AID arm
         // ($aid > MAX_AID refuses): MAX itself is legitimate, MAX+1 is not.
-        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
         $result = $indexer->parse(
             AnimeResponseParser::MAX_AID . "|main|x-jat|At ceiling\n"
             . (AnimeResponseParser::MAX_AID + 1) . "|main|x-jat|Above ceiling\n"
@@ -190,7 +190,7 @@ DAT;
         $restoreLog = $this->sinkErrorLog($logFile);
 
         try {
-            $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+            $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
             $indexer->parse("1abc|main|x-jat|Garbage aid\n99999999999999999999|main|x-jat|Overflow aid\n7|main|x-jat|Valid\n");
 
             $logged = file_get_contents($logFile);
@@ -211,7 +211,7 @@ DAT;
         $restoreLog = $this->sinkErrorLog($logFile);
 
         try {
-            $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+            $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
             $indexer->parse(self::FIXTURE_DAT);
 
             $logged = @file_get_contents($logFile);
@@ -228,7 +228,7 @@ DAT;
 
     public function test_parse_groups_multiple_titles_under_same_aid(): void
     {
-        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
         $result = $indexer->parse(self::FIXTURE_DAT);
 
         // AID 1 has 4 titles (main x2, official, synonym)
@@ -251,7 +251,7 @@ DAT;
 
     public function test_parse_preserves_type_and_lang_fields(): void
     {
-        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
         $result = $indexer->parse("1|main|x-jat|Bokura no Leader\n1|official|en|The Leader\n1|synonym|x-jat|Bokura\n");
 
         $titles = $result[0]['titles'];
@@ -287,7 +287,7 @@ DAT;
 
     public function test_parse_returns_empty_array_for_empty_content(): void
     {
-        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
         $result = $indexer->parse("");
 
         $this->assertCount(0, $result);
@@ -295,7 +295,7 @@ DAT;
 
     public function test_parse_returns_empty_array_for_only_comments(): void
     {
-        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
         $result = $indexer->parse("# comment\n# another\n");
 
         $this->assertCount(0, $result);
@@ -307,7 +307,7 @@ DAT;
 
     public function test_isStale_returns_true_for_nonexistent_file(): void
     {
-        $indexer = new TitleDumpIndexer('/tmp/nonexistent_dir_12345', 'http://example.com/anime-titles.dat.gz');
+        $indexer = new TitleDumpIndexer('/tmp/nonexistent_dir_12345', 'https://example.com/anime-titles.dat.gz');
 
         $this->assertTrue($indexer->isStale('/tmp/nonexistent_dir_12345/title_index.json'));
     }
@@ -318,7 +318,7 @@ DAT;
         file_put_contents($tmpFile, '[]');
 
         try {
-            $indexer = new TitleDumpIndexer(dirname($tmpFile), 'http://example.com/anime-titles.dat.gz');
+            $indexer = new TitleDumpIndexer(dirname($tmpFile), 'https://example.com/anime-titles.dat.gz');
 
             $this->assertFalse($indexer->isStale($tmpFile));
         } finally {
@@ -334,7 +334,7 @@ DAT;
         touch($tmpFile, time() - (25 * 3600));
 
         try {
-            $indexer = new TitleDumpIndexer(dirname($tmpFile), 'http://example.com/anime-titles.dat.gz');
+            $indexer = new TitleDumpIndexer(dirname($tmpFile), 'https://example.com/anime-titles.dat.gz');
 
             $this->assertTrue($indexer->isStale($tmpFile));
         } finally {
@@ -358,7 +358,7 @@ DAT;
         $this->assertTrue(touch($tmpFile, time() + 3600));
 
         try {
-            $indexer = new TitleDumpIndexer(dirname($tmpFile), 'http://example.com/anime-titles.dat.gz');
+            $indexer = new TitleDumpIndexer(dirname($tmpFile), 'https://example.com/anime-titles.dat.gz');
 
             $this->assertTrue($indexer->isStale($tmpFile), 'a future mtime means the clock or the file moved — treat as stale, not immortal');
         } finally {
@@ -375,7 +375,7 @@ DAT;
      */
     public function test_isStale_treats_unreadable_mtime_as_stale(): void
     {
-        $indexer = new TitleDumpIndexer('/tmp/cache', 'http://example.com/anime-titles.dat.gz');
+        $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
 
         $method = new \ReflectionMethod(TitleDumpIndexer::class, 'indexMtimeIsFresh');
         $method->setAccessible(true);
@@ -408,7 +408,7 @@ DAT;
         };
 
         try {
-            $indexer = new TitleDumpIndexer($tmpDir, 'http://example.com/anime-titles.dat.gz', $httpClient);
+            $indexer = new TitleDumpIndexer($tmpDir, 'https://example.com/anime-titles.dat.gz', $httpClient);
 
             $result = $indexer->downloadAndIndex();
 
@@ -447,7 +447,7 @@ DAT;
         };
 
         try {
-            $indexer = new TitleDumpIndexer($tmpDir, 'http://example.com/anime-titles.dat.gz', $httpClient);
+            $indexer = new TitleDumpIndexer($tmpDir, 'https://example.com/anime-titles.dat.gz', $httpClient);
 
             // First call: should download and index
             $result1 = $indexer->downloadAndIndex();
@@ -481,7 +481,7 @@ DAT;
         };
 
         try {
-            $indexer = new TitleDumpIndexer($tmpDir, 'http://example.com/anime-titles.dat.gz', $httpClient);
+            $indexer = new TitleDumpIndexer($tmpDir, 'https://example.com/anime-titles.dat.gz', $httpClient);
 
             // First call: downloads initial data
             $indexer->downloadAndIndex();
@@ -519,7 +519,7 @@ DAT;
         $restore = $this->sinkErrorLog($log); // M-ANIDB-19: a fail-closed refusal must be visible, not silent
 
         try {
-            $indexer = new TitleDumpIndexer($tmpDir, 'http://example.com/anime-titles.dat.gz', $httpClient);
+            $indexer = new TitleDumpIndexer($tmpDir, 'https://example.com/anime-titles.dat.gz', $httpClient);
 
             $result = $indexer->downloadAndIndex();
 
@@ -549,7 +549,7 @@ DAT;
         $restore = $this->sinkErrorLog($log); // M-ANIDB-19: a fail-closed refusal must be visible, not silent
 
         try {
-            $indexer = new TitleDumpIndexer($tmpDir, 'http://example.com/anime-titles.dat.gz', $httpClient);
+            $indexer = new TitleDumpIndexer($tmpDir, 'https://example.com/anime-titles.dat.gz', $httpClient);
 
             $result = $indexer->downloadAndIndex();
 
@@ -619,7 +619,7 @@ DAT;
         $restore = $this->sinkErrorLog($log);
 
         try {
-            $indexer = new TitleDumpIndexer($tmpDir, 'http://example.com/anime-titles.dat.gz', $httpClient);
+            $indexer = new TitleDumpIndexer($tmpDir, 'https://example.com/anime-titles.dat.gz', $httpClient);
 
             $this->assertFalse($indexer->downloadAndIndex());
             $logged = (string) file_get_contents($log);
@@ -665,7 +665,7 @@ DAT;
         $restore = $this->sinkErrorLog($log);
 
         try {
-            $indexer = new TitleDumpIndexer($tmpDir, 'http://example.com/anime-titles.dat.gz', $httpClient);
+            $indexer = new TitleDumpIndexer($tmpDir, 'https://example.com/anime-titles.dat.gz', $httpClient);
 
             $this->assertFalse($indexer->downloadAndIndex());
             $logged = (string) file_get_contents($log);

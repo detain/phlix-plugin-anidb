@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Tests for TitleDumpIndexer private method branches via reflection.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Manages the AniDB title dump index for fast offline title-to-AID lookups.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

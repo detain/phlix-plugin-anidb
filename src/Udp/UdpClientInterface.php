@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Transport seam for the AniDB UDP API.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

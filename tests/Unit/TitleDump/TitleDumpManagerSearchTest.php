@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Unit tests for TitleDumpManager search scoring logic.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

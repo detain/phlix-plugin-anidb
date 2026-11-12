@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Freshness re-entry tests for the resident-process title index.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Parses raw AniDB UDP anime response data into structured arrays.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Default production UdpClientInterface implementation over blocking sockets.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

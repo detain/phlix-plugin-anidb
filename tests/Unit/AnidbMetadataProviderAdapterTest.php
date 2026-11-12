@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Tests for the host-interface bridge adapter.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

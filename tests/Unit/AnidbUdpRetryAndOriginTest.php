@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Tests for 506 re-auth retry, origin validation and image URL whitelist validation.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

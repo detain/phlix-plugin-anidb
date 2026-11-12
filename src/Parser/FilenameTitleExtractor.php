@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Extracts a likely anime title from a file path via pure string manipulation.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

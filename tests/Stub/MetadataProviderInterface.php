@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Test-only stub of the host server metadata-provider contract.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

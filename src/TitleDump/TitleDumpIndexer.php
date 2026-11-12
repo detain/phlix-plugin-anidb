@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Downloads and indexes the AniDB anime-titles.dat.gz dump.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Test bootstrap for phlix-plugin-anidb.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

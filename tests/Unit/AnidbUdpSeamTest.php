@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Drives the UdpClient AUTH and command path through a fake transport.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT
@@ -280,7 +280,7 @@ final class AnidbUdpSeamTest extends TestCase
         $this->assertNotNull($this->sessionKeyOf($client));
     }
 
-    public function test_get_session_key_returns_null_when_not_authenticated(): void
+    public function test_session_key_is_null_when_not_authenticated(): void
     {
         $udp = new FakeUdpClient([]);
         $waiter = new NoOpWaiter();

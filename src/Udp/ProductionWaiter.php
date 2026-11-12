@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Production WaiterInterface implementation using blocking usleep.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

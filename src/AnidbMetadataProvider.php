@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * AniDB metadata provider plugin for Phlix.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

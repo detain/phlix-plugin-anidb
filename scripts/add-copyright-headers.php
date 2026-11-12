@@ -6,6 +6,11 @@
  *
  * Scans for .php files excluding vendor/, .git/, and generated files.
  * Inserts copyright docblock only if the file lacks detain@interserver.net.
+ *
+ * The header summary line is derived from the first sentence of the file's own
+ * docblock (the class/interface docblock). When none exists the script WARNS
+ * and falls back to a name-derived summary rather than stamping a literal
+ * placeholder.
  */
 
 declare(strict_types=1);
@@ -13,7 +18,7 @@ declare(strict_types=1);
 $rootDir = $argv[1] ?? __DIR__;
 $copyright = <<<'COPYRIGHT'
 /**
- * <one-line description>.
+ * {{DESCRIPTION}}.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT
@@ -89,12 +94,23 @@ foreach ($iterator as $file) {
 
     $insertPos = $phpOpenPos + 5 + $endTagPos;
 
-    // Build new content: <?php + header + rest
     $before = substr($content, 0, $insertPos);
     $after = substr($content, $insertPos);
 
+    // Derive the one-line summary from the file's first docblock, else warn.
+    $summary = null;
+    if (preg_match('#/\*\*\R\s*\*\s+([^\r\n@][^\r\n]*)#', $after, $dm)) {
+        $summary = rtrim(trim($dm[1]), '.');
+    }
+    if ($summary === null || $summary === '') {
+        $summary = 'Source file ' . $file->getBasename('.php');
+        echo "WARN: no docblock summary to derive a header description from; used fallback: $path\n";
+    }
+    $header = str_replace('{{DESCRIPTION}}', $summary, $copyright);
+
+    // Build new content: <?php + header + rest
     // Normalize: ensure exactly one blank line after header
-    $newContent = rtrim($before) . "\n\n" . ltrim($copyright) . ltrim($after);
+    $newContent = rtrim($before) . "\n\n" . ltrim($header) . ltrim($after);
 
     if (file_put_contents($path, $newContent) === false) {
         echo "ERROR: Failed to write: $path\n";

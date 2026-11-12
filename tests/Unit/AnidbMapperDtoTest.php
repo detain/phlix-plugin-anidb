@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Contract tests for the parser-to-mapper boundary through the typed AnimeDto.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Data Transfer Object representing parsed anime data from AniDB.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Abstraction for sleep/wait operations.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

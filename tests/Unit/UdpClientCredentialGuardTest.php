@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Pins the fail-fast credential guard at the entry of UdpClient::authenticate().
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

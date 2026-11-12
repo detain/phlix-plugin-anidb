@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Additional tests for AnidbMetadataProvider methods.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

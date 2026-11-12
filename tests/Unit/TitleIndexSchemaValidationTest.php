@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Unit tests for title_index.json schema validation in TitleDumpManager.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

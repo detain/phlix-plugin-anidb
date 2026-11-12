@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Unit tests for SocketUdpClient.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

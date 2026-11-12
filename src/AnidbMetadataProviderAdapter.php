@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * Host-interface adapter exposing AnidbMetadataProvider through the server MetadataProviderInterface contract.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

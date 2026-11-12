@@ -1,7 +1,7 @@
 <?php
 
 /**
- * <one-line description>.
+ * AniDB UDP session and command client.
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

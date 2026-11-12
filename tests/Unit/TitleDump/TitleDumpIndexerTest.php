@@ -622,10 +622,17 @@ DAT;
             $indexer = new TitleDumpIndexer($tmpDir, 'http://example.com/anime-titles.dat.gz', $httpClient);
 
             $this->assertFalse($indexer->downloadAndIndex());
+            $logged = (string) file_get_contents($log);
             $this->assertStringContainsString(
                 'compressed-download cap',
-                (string) file_get_contents($log),
+                $logged,
                 'the oversize refusal logged no reason',
+            );
+            // ANI-25: the refusal names sizes in human units, raw bytes alongside.
+            $this->assertStringContainsString(
+                '16.0 MiB (16777217 bytes), over the 16 MiB (16777216-byte) compressed-download cap',
+                $logged,
+                'the oversize refusal does not name the sizes in human-readable units',
             );
             $this->assertFileDoesNotExist($tmpDir . '/title_index.json', 'the refused body was written anyway');
         } finally {
@@ -661,10 +668,17 @@ DAT;
             $indexer = new TitleDumpIndexer($tmpDir, 'http://example.com/anime-titles.dat.gz', $httpClient);
 
             $this->assertFalse($indexer->downloadAndIndex());
+            $logged = (string) file_get_contents($log);
             $this->assertStringContainsString(
                 'decompressed size reached',
-                (string) file_get_contents($log),
+                $logged,
                 'the decompressed-cap refusal logged no reason',
+            );
+            // ANI-25: the cap is named in human units, raw bytes alongside.
+            $this->assertStringContainsString(
+                'reached the 64 MiB (67108864-byte) cap',
+                $logged,
+                'the decompressed-cap refusal does not name the cap in human-readable units',
             );
             $this->assertFileDoesNotExist($tmpDir . '/title_index.json', 'the refused payload was written anyway');
         } finally {

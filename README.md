@@ -131,11 +131,12 @@ whatever URL the `title_dump_url` setting names. The setting lives in the
 plugin settings form (advanced tier), so only an administrator can change it.
 Members cannot reach it. The fetched body is never shown to anyone. It is
 size-capped and thrown away unless it decompresses and parses as a valid title
-dump. Only refusal reasons and byte counts are logged. There is **no host
+dump. Logs carry only refusal reasons, byte counts, the scrubbed URL and the
+transport error class/message — never body content. There is **no host
 allowlist and no private/loopback-range deny** on this URL today, so an
 administrator can point the fetch at an internal address and the server will
-send that request blind. This is accepted because only administrators can set
-the URL. **If `title_dump_url` ever becomes settable by members**, a host
+send that request; only the transport outcome is logged. This is accepted
+because only administrators can set the URL. **If `title_dump_url` ever becomes settable by members**, a host
 allowlist or a private-range deny must ship in the same change.
 
 See the [AniDB UDP API docs](https://wiki.anidb.net/UDP_API_Definition) for full details.

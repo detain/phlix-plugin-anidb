@@ -48,23 +48,24 @@ final class TitleDumpIndexer
     private const MAX_AID = AnimeResponseParser::MAX_AID;
 
     /**
-     * Hard cap on the raw (gzipped) download body, in bytes.
+     * Hard cap on the raw (gzipped) download body: 16 MiB (16,777,216 bytes).
      *
      * The real anime-titles.dat.gz is ~1.5 MB; 16 MiB leaves an order of
      * magnitude of legit headroom while refusing an off-domain response
      * (a misconfigured redirect to a large file must not exhaust worker
      * memory — review M-ANIDB-28).
      */
-    public const MAX_DOWNLOAD_BYTES = 16777216;
+    public const MAX_DOWNLOAD_BYTES = 16 * 1024 * 1024;
 
     /**
-     * Hard cap on the DECOMPRESSED payload, in bytes (gzip-bomb defense).
+     * Hard cap on the DECOMPRESSED payload: 64 MiB (67,108,864 bytes) —
+     * gzip-bomb defense.
      *
      * Passed to gzdecode() as its max_length so decompression itself stops
      * at the cap; a payload reaching it is truncated or hostile either way
      * and is refused fail-closed rather than parsed.
      */
-    public const MAX_DECOMPRESSED_BYTES = 67108864;
+    public const MAX_DECOMPRESSED_BYTES = 64 * 1024 * 1024;
 
     /**
      * Wall-clock budget handed to the dump HTTP client, in seconds.
@@ -1071,8 +1072,10 @@ final class TitleDumpIndexer
         $bodyBytes = strlen($fetchResult);
         if ($bodyBytes > self::MAX_DOWNLOAD_BYTES) {
             error_log(sprintf(
-                'TitleDumpIndexer: REFUSING response — %d bytes exceeds the %d byte compressed-download cap',
+                'TitleDumpIndexer: REFUSING response — body is %s (%d bytes), over the %s (%d-byte) compressed-download cap',
+                self::mebibytes($bodyBytes),
                 $bodyBytes,
+                self::mebibytes(self::MAX_DOWNLOAD_BYTES),
                 self::MAX_DOWNLOAD_BYTES,
             ));
 
@@ -1087,7 +1090,8 @@ final class TitleDumpIndexer
 
         if (strlen($decoded) >= self::MAX_DECOMPRESSED_BYTES) {
             error_log(sprintf(
-                'TitleDumpIndexer: REFUSING response — decompressed size reached the %d byte cap (gzip bomb or truncated dump)',
+                'TitleDumpIndexer: REFUSING response — decompressed size reached the %s (%d-byte) cap (gzip bomb or truncated dump)',
+                self::mebibytes(self::MAX_DECOMPRESSED_BYTES),
                 self::MAX_DECOMPRESSED_BYTES,
             ));
 
@@ -1108,6 +1112,21 @@ final class TitleDumpIndexer
         }
 
         return $this->writeIndex($index);
+    }
+
+    /**
+     * Render a byte count in mebibytes for the size-cap refusal lines (ANI-25):
+     * "16 MiB" for an exact multiple, one decimal ("16.0 MiB") otherwise, so an
+     * over-cap body never prints identically to the cap it breached. Callers
+     * log the raw byte count alongside, which stays the precise figure.
+     */
+    private static function mebibytes(int $bytes): string
+    {
+        $mib = 1024 * 1024;
+
+        return $bytes % $mib === 0
+            ? sprintf('%d MiB', intdiv($bytes, $mib))
+            : sprintf('%.1f MiB', $bytes / $mib);
     }
 
     /**

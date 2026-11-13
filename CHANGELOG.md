@@ -17,6 +17,9 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Changed
+- Audit gate (MAL-17): `scripts/security-audit-check.php` messages no longer print the slash-stem plurals "advisory/ies" / "repository/ies"; they pluralise correctly (1 advisory, 2 advisories). Estate family wave; test mirrors updated in lockstep.
+
+### Changed
 - `fetchAnimeMetadata()` now memoises its mapped result per AID for 60 s
   (bounded to 256 entries, per-instance, successes only) so the adapter's
   search/getDetails/getImages triad costs one UDP round trip instead of

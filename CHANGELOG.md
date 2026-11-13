@@ -17,6 +17,17 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Changed
+- AUTH now follows a live-verified ENCRYPT handshake (`ENCRYPT user=..&type=1`
+  -> `209 <salt> ENCRYPTION ENABLED`, key `md5(api_key . salt)`, AES-128-ECB) so
+  the API key never travels in the clear; new `AnidbCipher`,
+  `EncryptableTransportInterface`, `ext-openssl` requirement. The guessed
+  `201 <chal> CHALLENGE` / `auth=md5(...)` leg (ANI-S21) is removed: a live
+  capture showed no such reply exists. Wire capture recorded (redacted) in
+  `docs/captures/anidb-udp-wire-2026-11-13.md` (ANI-S19/ANI-S21).
+- PING is now wire-verified: the reply is `300 PONG` (a result frame, not
+  ACK-only), so no result-wait exemption is needed; `PING`/`ENCRYPT` join the
+  expected-result-code table and the fabricated `200 PONG` fixture is replaced
+  (ANI-S19, review ANI-6). Prose polish: HTTPS capitalisation, wording nits.
 - Audit gate (MAL-17): `scripts/security-audit-check.php` messages no longer print the slash-stem plurals "advisory/ies" / "repository/ies"; they pluralise correctly (1 advisory, 2 advisories). Estate family wave; test mirrors updated in lockstep.
 
 ### Changed

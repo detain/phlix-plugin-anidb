@@ -294,10 +294,11 @@ final class AnidbUdpSeamTest extends TestCase
     {
         $udp = new FakeUdpClient([
             '200 SESSION_KEY LOGIN ACCEPTED',
-            // ASSUMPTION, NOT WIRE EVIDENCE (ANI-6): the real PING reply shape is
-            // uncaptured (may be ACK-only, 001 overhead). Premise falsifiable by
-            // the gated credentialed capture; ping() must not depend on it.
-            '200 PONG', // PING response (fabricated placeholder)
+            // WIRE-VERIFIED 2026-11-13 (docs/captures/anidb-udp-wire-2026-11-13.md):
+            // the earlier "200 PONG" fixture was a fabricated assumption and was
+            // wrong on both counts — the real reply is a 300-class result frame,
+            // not an ACK-only 001 and not 200. ping() must not depend on it.
+            '300 PONG', // PING response (captured shape)
         ]);
         $waiter = new NoOpWaiter();
 

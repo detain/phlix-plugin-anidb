@@ -14,7 +14,7 @@
  * flips the operator-configured http mirror from a loud warning to a
  * refusal, with the documented http-mirror path preserved behind the
  * explicit PHLIX_ANIDB_ALLOW_HTTP_DUMP_MIRROR=1 opt-in (which still logs the
- * loud cleartext warning on every attempt).
+ * cleartext warning on every attempt).
  *
  * @copyright 2026 Joe Huss <detain@interserver.net>
  * @license   MIT

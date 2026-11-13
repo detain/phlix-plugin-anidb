@@ -56,7 +56,7 @@ final class AnidbFloodIntervalTest extends TestCase
         $waiter = null;
         $client = $this->makeClientWithResponses(
             $timeline,
-            ['200 K1 LOGIN ACCEPTED', '200 PONG', '230 ANIME ok'],
+            ['200 K1 LOGIN ACCEPTED', '300 PONG', '230 ANIME ok'],
             $waiter,
         );
         $client->authenticate();

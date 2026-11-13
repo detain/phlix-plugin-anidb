@@ -42,7 +42,7 @@ use Socket;
  * @package Phlix\Anidb\Udp
  * @since 0.3.0
  */
-final class SocketUdpClient implements UdpClientInterface
+final class SocketUdpClient implements UdpClientInterface, EncryptableTransportInterface
 {
     /**
      * Number of consecutive local ports open() may try starting at localPort.
@@ -86,6 +86,22 @@ final class SocketUdpClient implements UdpClientInterface
     private int $localPort;
 
     /**
+     * {@inheritDoc}
+     */
+    public function setCipherKey(?string $rawKey): void
+    {
+        $this->cipherKey = $rawKey;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function hasCipherKey(): bool
+    {
+        return $this->cipherKey !== null;
+    }
+
+    /**
      * The local port actually bound by open() (null until bound).
      */
     private ?int $boundPort = null;
@@ -98,6 +114,11 @@ final class SocketUdpClient implements UdpClientInterface
      * Socket-vs-resource ignores papered over (review M-ANIDB-20).
      */
     private ?Socket $socket = null;
+
+    /**
+     * Raw AES-128 ENCRYPT session key; null while datagrams travel in clear.
+     */
+    private ?string $cipherKey = null;
 
     /**
      * Source host of the most recently received reply (null until first reply).
@@ -204,10 +225,15 @@ final class SocketUdpClient implements UdpClientInterface
             throw new \RuntimeException('UDP socket not open');
         }
 
+        // Expected result codes key off the PLAINTEXT command; the wire form
+        // is the ciphertext when an ENCRYPT key is installed.
+        $expected = self::expectedResultCodes($data);
+        $wire = $this->cipherKey !== null ? AnidbCipher::encrypt($data, $this->cipherKey) : $data;
+
         $bytesSent = @socket_sendto(
             $this->socket,
-            $data,
-            strlen($data),
+            $wire,
+            strlen($wire),
             0,
             $this->host,
             $this->port
@@ -229,7 +255,6 @@ final class SocketUdpClient implements UdpClientInterface
         // loop fixes both shapes without a pre-send drain: any stale framing
         // frame is consumed by the same loop that then waits for the result.
         $deadline = microtime(true) + self::RESPONSE_BUDGET_SECONDS;
-        $expected = self::expectedResultCodes($data);
 
         while (true) {
             $remaining = $deadline - microtime(true);
@@ -263,6 +288,17 @@ final class SocketUdpClient implements UdpClientInterface
 
             if ($recvResult === false) {
                 return null;
+            }
+
+            if ($this->cipherKey !== null) {
+                // Encrypted session: every genuine reply is ciphertext.
+                // Anything that does not decrypt is not from the peer we
+                // negotiated with — skip it inside the same bounded budget.
+                $plain = AnidbCipher::decrypt($recvBuf, $this->cipherKey);
+                if ($plain === null) {
+                    continue;
+                }
+                $recvBuf = $plain;
             }
 
             $frame = trim($recvBuf);
@@ -323,6 +359,10 @@ final class SocketUdpClient implements UdpClientInterface
 
         return match ($verb) {
             'AUTH' => [200, 201],
+            // Wire-verified 2026-11-13: bare PING -> "300 PONG" (a real result
+            // frame, NOT 001-ACK-only), so PING needs no wait exemption.
+            'PING' => [300],
+            'ENCRYPT' => [209],
             'ANIME' => [230, 231],
             'ANIMEDESC' => [233],
             default => null,
@@ -370,6 +410,7 @@ final class SocketUdpClient implements UdpClientInterface
      */
     public function close(): void
     {
+        $this->cipherKey = null;
         if ($this->socket !== null) {
             @socket_close($this->socket);
             $this->socket = null;

@@ -300,12 +300,14 @@ final class UdpClient
      * re-auth the AUTH datagram waits its turn behind the command that just
      * expired the session.
      *
-     * Posture note: the AniDB UDP API has no encrypted transport. The first
-     * datagram still carries pass= (cleartext) until the md5 challenge wire
-     * form is captured; when the server answers with a challenge the client
-     * replies with auth=md5(challenge.password) instead. Operators should use
-     * a dedicated AniDB account whose API password differs from the site
-     * login password. See README ("Protocol & credential posture").
+     * Posture: when the transport supports it, AUTH is preceded by the
+     * wire-verified `ENCRYPT user=<name>&type=1` handshake (`209 <salt>
+     * ENCRYPTION ENABLED`; key = md5(api_key . salt), AES-128-ECB), so the
+     * AUTH datagram and every later datagram travel encrypted. A server
+     * that refuses ENCRYPT leaves the session on the cleartext fallback
+     * (logged). Operators should still use a dedicated AniDB account whose
+     * API password differs from the site login password. See README
+     * ("Protocol & credential posture").
      *
      * @return void
      *
@@ -314,6 +316,7 @@ final class UdpClient
     public function authenticate(): void
     {
         $this->requireCredentials();
+        $this->negotiateEncryption();
 
         $cmd = sprintf(
             'AUTH user=%s&pass=%s&protover=3&client=phlix&clientver=1',
@@ -328,23 +331,6 @@ final class UdpClient
             throw new \RuntimeException('AniDB AUTH: no response (timeout or network failure)');
         }
 
-        // md5 challenge leg (ANI-S21): a "201 <challenge> CHALLENGE" reply is
-        // answered with auth=md5(challenge . api_key) — the API password never
-        // travels in the clear on this leg. A genuine "201 <key> LOGIN ACCEPTED
-        // - NEW VERSION AVAILABLE" does not carry the CHALLENGE token and falls
-        // through to the session parse below. The exact wire form of the
-        // challenge reply is owner-gated (capture budget shared with S19/S20).
-        if (preg_match('/^201\s+(\S+)\s+CHALLENGE\b/', $response, $chal)) {
-            $response = $this->udpSend(sprintf(
-                'AUTH user=%s&auth=%s&protover=3&client=phlix&clientver=1',
-                urlencode($this->settings['username']),
-                md5($chal[1] . $this->settings['api_key'])
-            ));
-            if ($response === null) {
-                throw new \RuntimeException('AniDB AUTH: no response to challenge answer (timeout or network failure)');
-            }
-        }
-
         // Parse: "200 SESSION_KEY LOGIN ACCEPTED" or "201 SESSION_KEY ..."
         if (!preg_match('/^(200|201)\s+(\S+)\s+/', $response, $matches)) {
             throw $this->parseAuthFailure($response);
@@ -352,6 +338,47 @@ final class UdpClient
 
         $this->sessionKey = $matches[2];
         $this->lastActivityTime = time();
+    }
+
+    /**
+     * Negotiate AniDB packet encryption (ENCRYPT type 1) ahead of AUTH.
+     *
+     * Wire-verified 2026-11-13 (docs/captures/anidb-udp-wire-2026-11-13.md):
+     * `ENCRYPT user=<name>&type=1` -> `209 <salt> ENCRYPTION ENABLED`, then
+     * AES-128-ECB with key md5(api_key . salt). The server drops encryption
+     * state with the session, so every authenticate() (first auth, 506
+     * re-auth, post-LOGOUT) renegotiates from a cleared key.
+     *
+     * @return void
+     *
+     * @throws \RuntimeException On no reply, or a ban-class refusal.
+     */
+    private function negotiateEncryption(): void
+    {
+        if (!$this->transport instanceof EncryptableTransportInterface) {
+            return;
+        }
+
+        $this->transport->setCipherKey(null);
+
+        $response = $this->udpSend(sprintf('ENCRYPT user=%s&type=1', urlencode($this->settings['username'])));
+
+        if ($response === null) {
+            throw new \RuntimeException('AniDB ENCRYPT: no response (timeout or network failure)');
+        }
+
+        if (preg_match('/^209\s+(\S+)\s+ENCRYPTION ENABLED/', $response, $m)) {
+            $this->transport->setCipherKey(AnidbCipher::deriveKey($this->settings['api_key'], $m[1]));
+
+            return;
+        }
+
+        if (preg_match('/^(504|555)\b/', $response)) {
+            throw $this->parseAuthFailure($response);
+        }
+
+        error_log('AniDB: server refused ENCRYPT (' . substr(trim($response), 0, self::AUTH_FAILURE_BODY_MAX)
+            . '); continuing on the cleartext AUTH fallback');
     }
 
     /**
@@ -416,15 +443,13 @@ final class UdpClient
             return;
         }
 
-        // The PING reply shape is UNVERIFIED on the wire (ANI-6): no credentialed
-        // capture exists yet, so the "200 PONG" in the test fixture is an
-        // assumption, not evidence. Defensive stance: the reply is deliberately
-        // ignored whatever it is (null / timeout, a 001 ACK-only frame, a
-        // PONG-like 2xx, anything else) and never alters session state. Gated
-        // follow-up (deferred-gated:ANI-S19 capture=credentialed-PING-reply):
-        // if the capture shows ACK-only, exempt PING/LOGOUT from result-frame
-        // waiting in SocketUdpClient::send() so the 10 s budget cannot burn
-        // every keep-alive interval.
+        // Wire-verified 2026-11-13 (docs/captures/anidb-udp-wire-2026-11-13.md):
+        // PING is answered by a real result frame, "300 PONG" — not a 001
+        // ACK-only overhead frame — so SocketUdpClient's result wait returns
+        // promptly and the 10 s budget does not burn on keep-alives. The
+        // reply is still deliberately ignored here and never alters session
+        // state. (A session-bearing "PING s=<key>" was not capturable
+        // without a password; the bare form is what was observed.)
         $this->udpSend('PING s=' . $this->sessionKey);
         $this->lastActivityTime = time();
     }

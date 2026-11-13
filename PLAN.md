@@ -87,6 +87,10 @@ source port across processes is unmeasured (owner-gated production-box probe).
 ### 2.3 Session Lifecycle
 
 ```
+0. ENCRYPT user=X&type=1   (wire-verified 2026-11-13)
+   → 209 <salt> ENCRYPTION ENABLED   (key = md5(api_key . salt), AES-128-ECB;
+     all later datagrams encrypted — see docs/captures/anidb-udp-wire-2026-11-13.md)
+
 1. AUTH user=X&pass=X&protover=3&client=phlix&clientver=1
    → 200 SESSION_KEY LOGIN ACCEPTED
    → 201 SESSION_KEY LOGIN ACCEPTED - NEW VERSION AVAILABLE
@@ -95,7 +99,7 @@ source port across processes is unmeasured (owner-gated production-box probe).
 
 2. [Send commands with &s=SESSION_KEY]
 
-3. PING every ~30 min OR logout after 35 min idle
+3. PING every ~30 min OR logout after 35 min idle   (bare PING → 300 PONG, wire-verified)
 
 4. LOGOUT s=SESSION_KEY
    → 203 LOGGED OUT

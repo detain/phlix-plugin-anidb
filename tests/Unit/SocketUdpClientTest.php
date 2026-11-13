@@ -282,11 +282,11 @@ final class SocketUdpClientTest extends TestCase
             // exchange is still sitting in the buffer when the next command's
             // reply arrives. The old transport read it as this command's
             // response — the reply-stream poison the review flagged.
-            $this->queueFromServer($server, $client, ["005 RELEASE s=1234", "240 PONG"]);
+            $this->queueFromServer($server, $client, ["005 RELEASE s=1234", "300 PONG"]);
 
             $reply = $client->send('PING s=K9SESSIONKEY');
 
-            $this->assertSame('240 PONG', $reply);
+            $this->assertSame('300 PONG', $reply);
         } finally {
             $this->closePair($server, $client);
         }
@@ -365,7 +365,7 @@ final class SocketUdpClientTest extends TestCase
         // lookalike numeric lines, which must NOT be skipped.
         $this->assertFalse(SocketUdpClient::isFramingFrame('200 K9 LOGIN ACCEPTED'));
         $this->assertFalse(SocketUdpClient::isFramingFrame('230 ANIME\n1|0'));
-        $this->assertFalse(SocketUdpClient::isFramingFrame('240 PONG'));
+        $this->assertFalse(SocketUdpClient::isFramingFrame('300 PONG'));
         $this->assertFalse(SocketUdpClient::isFramingFrame('250 2 123 456'));
         $this->assertFalse(SocketUdpClient::isFramingFrame('506 SESSION EXPIRED'));
         $this->assertFalse(SocketUdpClient::isFramingFrame('0011 NOT-A-REAL-FRAME'));

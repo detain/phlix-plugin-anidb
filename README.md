@@ -103,20 +103,21 @@ resident Workerman worker.
 
 - **Protocol**: UDP (not HTTP) to `api.anidb.net:9000`
 - **Flood protection**: ≤ 0.5 packets/sec after first 5, minimum 4 seconds between packets
-- **Session**: valid 35 minutes; keep-alive with PING every ~30 minutes
+- **Session**: valid 35 minutes; keep-alive with PING every ~30 minutes (the server answers a bare `PING` with `300 PONG`)
 - **Flood ban**: reusing the same local UDP port is critical to avoid IP-level bans
 - **Field coverage**: the ANIME amask in use (`00f0f0f0000000`) returns titles, episode/date and rating fields only — AniDB's category/genre tags are not part of that response, so `genres` is structurally always empty (deriving real genres would additionally require vote/weight filtering over the tag cloud)
 
 ### Protocol & credential posture
 
-The AniDB UDP API has no TLS/encrypted transport and no TCP alternative. The
-client supports the md5 challenge form of AUTH (`auth=md5(challenge + key)`,
-protover 3), so the API Key need not travel in the clear **when the server issues
-a challenge**; the initial AUTH datagram still carries `pass=` in a **cleartext
-UDP datagram** until the challenge wire form is confirmed by a live capture
-(owner-gated). Cleartext is the optional fallback, not an inherent property of
-the client. Until then, any party on the network path between the Phlix server
-and `api.anidb.net:9000` could read those bytes. Mitigations, in order of
+The AniDB UDP API has no TLS and no TCP alternative, but it does offer packet
+encryption: the client opens every session with `ENCRYPT user=<name>&type=1`
+(the server answers `209 <salt> ENCRYPTION ENABLED`), derives an AES-128 key as
+`md5(api_key + salt)`, and sends the AUTH datagram and every later command
+encrypted. This handshake was verified against the live server (see
+`docs/captures/anidb-udp-wire-2026-11-13.md`). If the server ever refuses
+ENCRYPT, the client logs that and falls back to the cleartext `pass=` AUTH, in
+which case any party on the network path between the Phlix server and
+`api.anidb.net:9000` could read those bytes. Mitigations, in order of
 importance:
 
 - Use a **dedicated AniDB account** for Phlix, never your personal one.

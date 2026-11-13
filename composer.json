@@ -7,7 +7,7 @@
     "homepage": "https://github.com/detain/phlix-plugin-anidb",
     "require": {
         "php": ">=8.3",
-        "detain/phlix-shared": "^0.52.0",
+        "detain/phlix-shared": "^0.54.0",
         "ext-mbstring": "*",
         "ext-openssl": "*",
         "ext-sockets": "*",

@@ -115,8 +115,9 @@ protover 3), so the API Key need not travel in the clear **when the server issue
 a challenge**; the initial AUTH datagram still carries `pass=` in a **cleartext
 UDP datagram** until the challenge wire form is confirmed by a live capture
 (owner-gated). Cleartext is the optional fallback, not an inherent property of
-the client. Until then, any party on the network path between the Phlix server and `api.anidb.net:9000`
-could read those bytes. Mitigations, in order of importance:
+the client. Until then, any party on the network path between the Phlix server
+and `api.anidb.net:9000` could read those bytes. Mitigations, in order of
+importance:
 
 - Use a **dedicated AniDB account** for Phlix, never your personal one.
 - Set an **API password** that is unique to AniDB and not reused anywhere

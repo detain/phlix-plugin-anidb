@@ -1,43 +1,53 @@
 # Non-blocking contract in the resident host (ANI-1 / ANI-S22)
 
-Design note. Status: **options laid out; the choice is owner-gated.** No
-behaviour change has landed under this note, and nothing here is a cure by
-itself: the M-ANIDB-16 precedent is that honest comments alone do not satisfy
-the `MetadataSourceInterface` non-blocking law (phlix-shared,
-`src/Metadata/MetadataSourceInterface.php`, "Implementations must be
-non-blocking in a resident-memory (Workerman) host").
+Design note. Status: **implemented — option (a), async-native default** (owner
+ruling). The contract being met is `MetadataSourceInterface` (phlix-shared,
+`src/Metadata/MetadataSourceInterface.php`): "Implementations must be
+non-blocking in a resident-memory (Workerman) host". The M-ANIDB-16 precedent
+stands: honest comments alone do not satisfy it, so the default path itself is
+cooperative and pinned by seam tests.
 
-## Current state (verified at the dispatch tip)
+## The problem (pre-ANI-S22)
 
-- `Udp\ProductionWaiter::wait()` is a blocking `usleep` (capped at 5 s). It is
-  the default waiter in both `AnidbMetadataProvider` and `Udp\UdpClient`.
+- `Udp\ProductionWaiter::wait()` is a blocking `usleep` (capped at 5 s) and was
+  the default waiter in `AnidbMetadataProvider` and `Udp\UdpClient`.
 - `UdpClient` flood pacing (>= 4 s between packets after the first 5) and the
-  reply budget go through that waiter, so a throttled lookup occupies the
+  reply budget go through that waiter, so a throttled lookup parked the whole
   worker for the pacing window plus the socket read budget.
-- `Udp\SocketUdpClient` performs blocking-style socket reads bounded by a
-  timeout.
-- The `WaiterInterface` seam exists, so a cooperative waiter can be injected,
-  but nothing in the default registration path injects one.
+- `Udp\SocketUdpClient` parked in one blocking `socket_select()` (10 s).
 
-## Options
+## The design
 
-| Option | What it does | Cross-repo? |
-|--------|--------------|-------------|
-| (a) async-native default | Default waiter and transport are cooperative (event-loop timer + non-blocking datagram socket); `ProductionWaiter` becomes CLI/test-only | Likely: needs a host-provided loop/timer handle (phlix-shared seam, host injection in server/hub) |
-| (b) refuse registration | `onEnable()` refuses to register the source until the host injects non-blocking waiter + transport seams | Yes: host must inject the seams; contract text may need a phlix-shared change |
-| (c) honest disclosure | Registry-visible statement of the worker-occupation window (worst case ~ pacing + read budget per lookup) | No, but explicitly not a cure per M-ANIDB-16 |
+| Piece | Behaviour |
+|-------|-----------|
+| `Udp\CooperativeWaiter` (default) | Inside a Fiber, suspends the Fiber and resumes it from the event loop; the worker serves other requests meanwhile |
+| Loop discovery | Never a declared dependency. `Revolt\EventLoop` (`getSuspension()` + `delay()`) when present; else `Workerman\Timer::add($s, $resume, [], false)` (one-shot: the 4th argument defaults to persistent = true) + `Fiber::suspend()`; else none |
+| Host injection | `new CooperativeWaiter($closure)` accepts a host-supplied "suspend the current Fiber for N seconds" closure, bypassing discovery |
+| No loop reachable (CLI, tests, a dedicated blocking worker, or outside a Fiber) | Bounded `usleep` (<= 5 s) and `canYield()` reports `false` |
+| `Udp\SocketUdpClient::send()` | Polls the reply with non-blocking `socket_select()` and yields to the waiter between empty polls, instead of one 10 s blocking select; when `canYield()` is false it keeps the blocking-select path |
+| `Udp\ProductionWaiter` | Remains as the explicit blocking choice (CLI / tests) |
 
-## Constraints for whichever option is chosen
+Rejected alternatives: (b) refusing registration until the host injects
+non-blocking seams (breaks every host that has not been taught to inject), and
+(c) disclosure only (not a cure per M-ANIDB-16).
 
-- `vendor/` is never edited in place; any interface-text change is a
-  phlix-shared lane plus a re-vendor.
-- Acceptance requires seam tests proving the default registration path has no
-  busy-wait / blocking-sleep arm, plus full phpunit and phpstan.
-- Lands before ANI-S23 (single UDP owner / cross-process flood accounting),
-  which shares the same transport core.
+## Evidence
 
-## Open decision
+- `tests/Unit/CooperativeWaiterTest.php`: an injected closure is used inside a
+  Fiber with no `usleep`; the outside-a-Fiber fallback; the default
+  registration path builds a `CooperativeWaiter`; a silent peer is polled
+  non-blockingly with a yield on every empty poll.
+- `tests/Unit/CooperativeWaiterAutodetectTest.php`: the discovery closures
+  themselves, against process-isolated doubles
+  (`tests/Fixture/RevoltEventLoopSpy.php`, `tests/Fixture/WorkermanTimerSpy.php`,
+  which declare the real FQCNs and so must never load in the shared PHPUnit
+  process): Revolt is detected and parks the Fiber until its delay fires;
+  `Workerman\Timer` is detected and armed one-shot; Revolt wins when both exist;
+  the Workerman closure is a no-op outside a Fiber; with neither present the
+  waiter degrades to the bounded blocking fallback.
 
-Owner to choose (a), (b) or (c). Until then the plugin remains on the
-blocking default and the disclosure above stands as the only statement of the
-contract gap.
+## Interaction with ANI-S23
+
+The same transport core is shared with the single-UDP-owner work; see
+`UDP_SINGLE_OWNER_DESIGN.md`. A non-owner worker never opens a socket and so
+never waits at all.

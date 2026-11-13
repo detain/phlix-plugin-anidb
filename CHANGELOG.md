@@ -17,6 +17,15 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Changed
+- Review minors sweep: the ANI-S12 cache-dir validation (relative / symlink /
+  world-writable / foreign-owner refusals) moved into `CacheDirGuard`, so the
+  prod-only `fallbackTempBase` test property is gone and the foreign-owner
+  refusal now has a test; `TitleDumpManager` takes an optional
+  `$maxIndexFileBytes` (default unchanged, 128 MiB) and the oversize-index
+  fallback is tested; `FileUdpCoordinator::isOwner()` uses an explicit degraded
+  flag instead of the log-once flag; `CooperativeWaiter` Revolt / Workerman
+  auto-detect closures are covered by process-isolated tests;
+  `docs/NONBLOCKING_DESIGN.md` now records the implemented ANI-S22 design.
 - ANI-S23 / ANI-2: single UDP owner + cross-process flood accounting. New
   `UdpCoordinatorInterface` / `FileUdpCoordinator` (flock owner election and a
   shared pacing ledger in the cache dir); only the owner opens the AniDB socket

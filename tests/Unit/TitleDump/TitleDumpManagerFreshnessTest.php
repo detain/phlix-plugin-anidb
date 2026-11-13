@@ -218,6 +218,38 @@ final class TitleDumpManagerFreshnessTest extends TestCase
     }
 
     /**
+     * ANI-21: an index file over the byte cap is never decoded — the manager
+     * logs and falls back to an empty index instead of slurping it.
+     */
+    public function test_oversize_index_file_falls_back_to_empty_index(): void
+    {
+        $file = $this->writeIndexJson([
+            ['aid' => 1, 'titles' => [['title' => 'Big Show', 'type' => 'main', 'lang' => 'en']]],
+        ]);
+        $size = (int) filesize($file);
+
+        $logFile = $this->tmpDir . '/php-error.log';
+        $prev = ini_set('error_log', $logFile);
+        try {
+            // Cap one byte under the file size: oversize.
+            $over = new TitleDumpManager($this->tmpDir, 'https://example.test/dump.gz', null, $size - 1);
+            $over->ensureLoaded();
+            $this->assertNull($over->search('Big Show'));
+
+            // Cap exactly at the file size: accepted.
+            $at = new TitleDumpManager($this->tmpDir, 'https://example.test/dump.gz', null, $size);
+            $at->ensureLoaded();
+            $this->assertSame(1, $at->search('Big Show'));
+        } finally {
+            ini_set('error_log', (string) $prev);
+        }
+
+        $log = (string) file_get_contents($logFile);
+        $this->assertStringContainsString('exceeds ' . ($size - 1) . ' bytes', $log);
+        $this->assertStringNotContainsString('exceeds ' . $size . ' bytes', $log);
+    }
+
+    /**
      * @param list<array{aid: int, titles: list<array{title: string, type: string, lang: string}>}> $entries
      */
     private function writeIndexJson(array $entries, ?string $at = null): string

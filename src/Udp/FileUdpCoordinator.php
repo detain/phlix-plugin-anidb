@@ -33,6 +33,9 @@ final class FileUdpCoordinator implements UdpCoordinatorInterface
 
     private bool $degradedLogged = false;
 
+    /** True once coordination proved impossible; this process then runs standalone (acts as owner). */
+    private bool $degraded = false;
+
     /** @var callable(): float */
     private $clock;
 
@@ -60,6 +63,7 @@ final class FileUdpCoordinator implements UdpCoordinatorInterface
             // Coordination is impossible (unwritable dir). Degrade to the
             // pre-ANI-S23 standalone behaviour rather than disable AniDB for
             // every worker; log once per process.
+            $this->degraded = true;
             if (!$this->degradedLogged) {
                 $this->degradedLogged = true;
                 error_log('AniDB UDP: owner lock unavailable in "' . $this->dir
@@ -82,7 +86,7 @@ final class FileUdpCoordinator implements UdpCoordinatorInterface
 
     public function isOwner(): bool
     {
-        return $this->ownerHandle !== null || $this->degradedLogged;
+        return $this->ownerHandle !== null || $this->degraded;
     }
 
     public function reserveSendSlot(float $intervalSec): float

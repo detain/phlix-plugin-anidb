@@ -45,6 +45,10 @@ final class TitleDumpManager
      */
     private ?array $titleIndex = null;
 
+    /** Effective cap on the cached index read (defaults to {@see MAX_INDEX_FILE_BYTES}). */
+    /** @var int<1, max> */
+    private int $maxIndexFileBytes;
+
     /**
      * Lowercase title → AID map backing O(1) exact-match lookups.
      *
@@ -110,9 +114,16 @@ final class TitleDumpManager
      * @param string                           $titleDumpUrl URL to anime-titles.dat.gz
      *     (https; http only behind {@see TitleDumpIndexer::ALLOW_HTTP_DUMP_MIRROR_ENV}).
      * @param (callable(string,callable):void)|null $httpClient Transport seam for the indexer (tests).
+     * @param int $maxIndexFileBytes Cap on the cached index read; an oversize file falls back to
+     *     an empty index (ANI-21). Defaults to {@see MAX_INDEX_FILE_BYTES}.
      */
-    public function __construct(string $cacheDir, string $titleDumpUrl, ?callable $httpClient = null)
-    {
+    public function __construct(
+        string $cacheDir,
+        string $titleDumpUrl,
+        ?callable $httpClient = null,
+        int $maxIndexFileBytes = self::MAX_INDEX_FILE_BYTES,
+    ) {
+        $this->maxIndexFileBytes = max(1, $maxIndexFileBytes);
         $this->cacheDir = $cacheDir;
         $this->titleDumpUrl = $titleDumpUrl;
         $this->httpClient = $httpClient;
@@ -259,11 +270,11 @@ final class TitleDumpManager
 
         if ($readable) {
             // ANI-21: bounded read — never slurp an unbounded cached file.
-            $data = file_get_contents($indexFile, false, null, 0, self::MAX_INDEX_FILE_BYTES + 1);
-            if ($data !== false && strlen($data) > self::MAX_INDEX_FILE_BYTES) {
+            $data = file_get_contents($indexFile, false, null, 0, $this->maxIndexFileBytes + 1);
+            if ($data !== false && strlen($data) > $this->maxIndexFileBytes) {
                 error_log(sprintf(
                     'TitleDumpManager: title_index.json exceeds %d bytes, falling back to empty index',
-                    self::MAX_INDEX_FILE_BYTES
+                    $this->maxIndexFileBytes
                 ));
                 $data = false;
             }

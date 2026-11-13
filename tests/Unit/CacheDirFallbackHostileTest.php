@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Phlix\Anidb\Tests\Unit;
 
-use Phlix\Anidb\AnidbMetadataProvider;
+use Phlix\Anidb\CacheDirGuard;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -35,16 +35,14 @@ final class CacheDirFallbackHostileTest extends TestCase
         @rmdir($this->tmp);
     }
 
-    private function resolve(): string
+    private function resolve(?int $euid = null): string
     {
-        $p = (new \ReflectionClass(AnidbMetadataProvider::class))->newInstanceWithoutConstructor();
-        $f = new \ReflectionProperty($p, 'fallbackTempBase');
-        $f->setAccessible(true);
-        $f->setValue($p, $this->tmp);
-        $m = new \ReflectionMethod($p, 'resolveCacheDir');
-        $m->setAccessible(true);
-
-        return $m->invoke($p, [], null);
+        return CacheDirGuard::require(
+            $this->tmp . '/phlix-plugin-anidb',
+            'the default sys_get_temp_dir() fallback cache directory',
+            true,
+            $euid,
+        );
     }
 
     public function test_dangling_symlink_fallback_is_refused(): void
@@ -68,5 +66,27 @@ final class CacheDirFallbackHostileTest extends TestCase
     {
         mkdir($this->tmp . '/phlix-plugin-anidb', 0700);
         $this->assertSame(realpath($this->tmp . '/phlix-plugin-anidb'), $this->resolve());
+    }
+
+    public function test_foreign_owned_fallback_is_refused(): void
+    {
+        mkdir($this->tmp . '/phlix-plugin-anidb', 0700);
+        $owner = fileowner($this->tmp . '/phlix-plugin-anidb');
+        $this->assertIsInt($owner);
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('another local user pre-created it');
+        // Pretend the process runs as a different uid than the directory owner.
+        $this->resolve($owner + 1);
+    }
+
+    public function test_foreign_owner_is_only_refused_on_the_owned_route(): void
+    {
+        mkdir($this->tmp . '/phlix-plugin-anidb', 0700);
+        $owner = fileowner($this->tmp . '/phlix-plugin-anidb');
+        $this->assertIsInt($owner);
+        $this->assertSame(
+            realpath($this->tmp . '/phlix-plugin-anidb'),
+            CacheDirGuard::require($this->tmp . '/phlix-plugin-anidb', 'explicit', false, $owner + 1),
+        );
     }
 }

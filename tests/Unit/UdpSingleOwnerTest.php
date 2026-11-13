@@ -124,7 +124,12 @@ final class UdpSingleOwnerTest extends TestCase
 
         $prev = ini_set('error_log', '/dev/null');
         try {
+            $this->assertFalse($c->isOwner(), 'no ownership before the first election attempt');
             $this->assertTrue($c->tryBecomeOwner());
+            $this->assertTrue($c->isOwner(), 'degraded standalone mode acts as owner');
+            // A repeat attempt (log-once already spent) must stay owner.
+            $this->assertTrue($c->tryBecomeOwner());
+            $this->assertTrue($c->isOwner());
         } finally {
             ini_set('error_log', (string) $prev);
         }

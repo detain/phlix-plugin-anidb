@@ -59,6 +59,20 @@ The plugin is unsigned by design. Install via the Phlix admin UI:
   tests) the download is skipped rather than blocking, and the UDP path
   serves. See "AniDB Protocol Notes".
 
+### Non-blocking behaviour (resident worker)
+
+The UDP path is async-native by default. `CooperativeWaiter` (the default
+`WaiterInterface`) suspends the current Fiber and resumes it from the host event
+loop (`Revolt\EventLoop`, else a one-shot `Workerman\Timer`), and
+`SocketUdpClient` waits for AniDB replies with non-blocking `socket_select()`
+polls that yield between polls. A silent AniDB therefore never parks the worker
+for the 10 s budget or the 2 s flood-protection delay when the lookup runs inside
+a Fiber (Workerman 5 request handlers do). Outside a Fiber (plain CLI, unit
+tests) there is no loop to yield to, so the wait is a bounded blocking
+select/`usleep`. Hosts can inject their own `WaiterInterface` /
+`CooperativeWaiterInterface`; `ProductionWaiter` is the explicit blocking
+choice for dedicated UDP workers.
+
 ## Configuration
 
 Configure these in the Phlix admin **Plugins → Configure** dialog.

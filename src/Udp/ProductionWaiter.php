@@ -13,13 +13,10 @@ namespace Phlix\Anidb\Udp;
 /**
  * Production {@see WaiterInterface} implementation using blocking `usleep`.
  *
- * This is the default implementation for contexts where blocking is acceptable
- * (e.g. CLI, or a dedicated background worker that owns the UDP I/O path).
- *
- * When the plugin is loaded in a Workerman resident-worker context, callers
- * should use a Workerman\Timer-based implementation instead to avoid blocking
- * the event loop. The {@see WaiterInterface} seam makes this swap-in possible
- * without changing the call-site.
+ * NOT the default (ANI-S22): the plugin defaults to {@see CooperativeWaiter},
+ * which yields to the host event loop. Inject this explicitly only where
+ * blocking is acceptable (CLI, or a dedicated background worker that owns the
+ * UDP I/O path).
  *
  * @package Phlix\Anidb\Udp
  * @since 0.4.0

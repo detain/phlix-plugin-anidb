@@ -21,11 +21,11 @@ use Socket;
  * - AF_INET / SOCK_DGRAM / SOL_UDP socket, SO_REUSEADDR set;
  * - bound to a local port above 1024 (a preferred port, sliding across a small
  *   window if taken) to keep a stable source port for AniDB;
- * - send/receive waits bounded to 10 s via `socket_select()`: the wait is
- *   bounded and readable, but it is a real wall-clock wait — the calling
- *   worker is occupied for up to 10 s when no reply arrives (select parks the
- *   process just as long as a blocking recvfrom with SO_RCVTIMEO would; the
- *   difference is the mechanism, not the occupation);
+ * - send/receive waits bounded to 10 s via `socket_select()`; async-native by
+ *   default: in a Fiber host the wait polls non-blockingly and yields to the
+ *   event loop between polls ({@see CooperativeWaiter}), so the worker is NOT
+ *   occupied. Without a reachable event loop it degrades to one blocking
+ *   select (the old occupation window, now only a CLI/dedicated-worker case);
  * - {@see send()} sendto's the datagram then waits on `socket_select()` within
  *   ONE shared 10 s budget, skipping protocol framing frames (001 ACK / 002
  *   fragment / 005 RELEASE) and returning the first result-code payload (or
@@ -61,6 +61,9 @@ final class SocketUdpClient implements UdpClientInterface, EncryptableTransportI
      * per datagram — an endless stale stream can never extend the wait).
      */
     private const RESPONSE_BUDGET_SECONDS = 10;
+
+    /** Gap between non-blocking reply polls when yielding to the event loop. */
+    private const POLL_INTERVAL_SECONDS = 0.02;
 
     /**
      * Maximum datagram size the transport reads, matching the AniDB UDP MTU
@@ -131,16 +134,28 @@ final class SocketUdpClient implements UdpClientInterface, EncryptableTransportI
     private ?int $lastReplyPort = null;
 
     /**
+     * Waiter used to yield between non-blocking reply polls (async-native
+     * default: {@see CooperativeWaiter}).
+     */
+    private WaiterInterface $waiter;
+
+    /**
      * @param string $host      AniDB UDP API hostname (default api.anidb.net).
      * @param int    $port      AniDB UDP API port (default 9000).
      * @param int    $localPort Preferred local port to bind above 1024 (default 9001);
      *                          open() slides forward across a small window if it is taken.
+     * @param WaiterInterface|null $waiter Yield seam for reply polling. Defaults to
+     *                          {@see CooperativeWaiter}: inside a Fiber host the reply
+     *                          wait is non-blocking (poll + suspend), elsewhere it is a
+     *                          blocking select.
      */
     public function __construct(
         string $host = UdpClient::API_HOST,
         int $port = UdpClient::API_PORT,
-        int $localPort = 9001
+        int $localPort = 9001,
+        ?WaiterInterface $waiter = null
     ) {
+        $this->waiter = $waiter ?? new CooperativeWaiter();
         $this->host = $host;
         $this->port = $port;
         $this->localPort = $localPort;
@@ -212,12 +227,12 @@ final class SocketUdpClient implements UdpClientInterface, EncryptableTransportI
     /**
      * {@inheritDoc}
      *
-     * Waits for data availability with `socket_select()` (10 s budget) before
-     * the single `socket_recvfrom`, replacing the bare blocking read. Honest
-     * budget: a silent AniDB parks this call — and with it the worker task
-     * that made it — for the full ~10 s; only the syscall the process sits in
-     * differs from the old blocking read. (Full async UDP I/O is the open
-     * M-ANIDB-16 architecture question, not a transport detail.)
+     * Async-native by default (ANI-S22): within the 10 s budget the reply wait
+     * is a non-blocking `socket_select()` poll with a Fiber-suspending yield
+     * between polls (see {@see awaitReadable()}), so a silent AniDB no longer
+     * occupies the resident worker. Only when no event loop is reachable
+     * (CLI, a dedicated blocking worker) does it fall back to one blocking
+     * select for the remaining budget.
      */
     public function send(string $data): ?string
     {
@@ -264,19 +279,7 @@ final class SocketUdpClient implements UdpClientInterface, EncryptableTransportI
                 return null;
             }
 
-            $read = [$this->socket];
-            $write = null;
-            $except = null;
-
-            $selected = @socket_select(
-                $read,
-                $write,
-                $except,
-                (int) $remaining,
-                (int) (($remaining - (int) $remaining) * 1_000_000),
-            );
-
-            if ($selected === false || $selected === 0) {
+            if (!$this->awaitReadable($remaining)) {
                 return null;
             }
 
@@ -403,6 +406,52 @@ final class SocketUdpClient implements UdpClientInterface, EncryptableTransportI
     public static function isFramingFrame(string $frame): bool
     {
         return (bool) preg_match('/^00[125]\s/', $frame);
+    }
+
+    /**
+     * Wait until the socket is readable or the budget elapses.
+     *
+     * Async-native path (the default in a Fiber host): non-blocking
+     * `socket_select()` polls separated by {@see WaiterInterface::wait()}, which
+     * suspends the Fiber so the event loop keeps running — no worker
+     * occupation, no busy-wait (every empty poll yields). When the waiter
+     * cannot yield (CLI / dedicated blocking worker) one blocking select
+     * sleeps in the kernel for the remaining budget instead.
+     *
+     * @param float $remaining Seconds left in the exchange budget.
+     * @return bool True when a datagram is readable; false on timeout/error.
+     */
+    private function awaitReadable(float $remaining): bool
+    {
+        $deadline = microtime(true) + $remaining;
+        $cooperative = $this->waiter instanceof CooperativeWaiterInterface && $this->waiter->canYield();
+
+        while (true) {
+            $left = $deadline - microtime(true);
+            if ($left <= 0) {
+                return false;
+            }
+
+            $wait = $cooperative ? 0 : (int) $left;
+            $waitUsec = $cooperative ? 0 : (int) (($left - (int) $left) * 1_000_000);
+
+            $read = [$this->socket];
+            $write = null;
+            $except = null;
+            $selected = @socket_select($read, $write, $except, $wait, $waitUsec);
+
+            if ($selected === false) {
+                return false;
+            }
+            if ($selected > 0) {
+                return true;
+            }
+            if (!$cooperative) {
+                return false;
+            }
+
+            $this->waiter->wait(min(self::POLL_INTERVAL_SECONDS, $left));
+        }
     }
 
     /**

@@ -179,7 +179,7 @@ final class UdpClient
      * @param UdpClientInterface|null                   $transport Raw UDP transport. Defaults to
      *                                                                SocketUdpClient bound to AniDB endpoint.
      * @param WaiterInterface|null                     $waiter Flood-protection waiter. Defaults to
-     *                                                             ProductionWaiter (blocking).
+     *                                                             CooperativeWaiter (async-native).
      * @param list<string>|null                        $validOriginHosts Explicit set of acceptable
      *                                                             reply-origin hosts (IPs and/or the
      *                                                             hostname). Defaults to null → resolved
@@ -203,7 +203,7 @@ final class UdpClient
             self::API_HOST,
             self::API_PORT,
         );
-        $this->waiter = $waiter ?? new ProductionWaiter();
+        $this->waiter = $waiter ?? new CooperativeWaiter();
         $this->validOriginHosts = $validOriginHosts;
         $this->originHostsResolver = $originHostsResolver ?? self::resolveAnidbHosts(...);
     }

@@ -16,7 +16,7 @@ use Phlix\Anidb\Parser\FilenameTitleExtractor;
 use Phlix\Anidb\TitleDump\TitleDumpIndexer;
 use Phlix\Anidb\TitleDump\TitleDumpManager;
 use Phlix\Anidb\TitleDump\TitleDumpUrlMigration;
-use Phlix\Anidb\Udp\ProductionWaiter;
+use Phlix\Anidb\Udp\CooperativeWaiter;
 use Phlix\Anidb\Udp\SocketUdpClient;
 use Phlix\Anidb\Udp\UdpClient;
 use Phlix\Anidb\Udp\UdpClientInterface;
@@ -103,7 +103,7 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      *
      * Allows {@see enforceFloodProtection()} to yield to the event loop instead
      * of blocking with `usleep` when a non-blocking implementation (e.g.
-     * Workerman\Timer) is available in the host. Defaults to {@see ProductionWaiter}
+     * Workerman\Timer) is available in the host. Defaults to {@see CooperativeWaiter} (async-native: yields to the event loop in a Fiber host)
      * for backward compatibility; inject a no-op/stub in tests.
      */
     private WaiterInterface $waiter;
@@ -195,7 +195,7 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      *     original inline-socket behavior. Inject a fake in tests to drive
      *     AUTH/command/retry logic without the network.
      * @param WaiterInterface|null $waiter Waiter seam for flood-protection delays.
-     *     Defaults to {@see ProductionWaiter}. Inject a no-op/stub in tests to
+     *     Defaults to {@see CooperativeWaiter} (async-native: yields to the event loop in a Fiber host). Inject a no-op/stub in tests to
      *     verify computed wait times without real wall-clock delays.
      * @param AnimeResponseParser|null $animeParser Parser seam for 230 ANIME responses.
      *     Defaults to {@see AnimeResponseParser}. Inject a mock in tests.
@@ -276,11 +276,13 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         $this->settings['use_title_dump'] = self::normalizeFlag($settings, 'use_title_dump', true);
         $this->settings['title_dump_url'] = $effectiveDumpUrl;
         $this->cacheDir = $this->resolveCacheDir($settings, $cacheDir);
+        $this->waiter = $waiter ?? new CooperativeWaiter();
         $this->udpClient = $udpClient ?? new SocketUdpClient(
             UdpClient::API_HOST,
             UdpClient::API_PORT,
+            9001,
+            $this->waiter,
         );
-        $this->waiter = $waiter ?? new ProductionWaiter();
         $this->animeParser = $animeParser ?? new AnimeResponseParser();
         $this->filenameExtractor = $filenameExtractor ?? new FilenameTitleExtractor();
         $this->episodeExtractor = $episodeExtractor ?? new EpisodeExtractor();

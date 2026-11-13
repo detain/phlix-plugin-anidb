@@ -17,6 +17,15 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Changed
+- ANI-S22 / ANI-1: the non-blocking contract of `MetadataSourceInterface` is now
+  true on the default path. New `CooperativeWaiter` (+ `CooperativeWaiterInterface`)
+  is the default waiter for `AnidbMetadataProvider`, `UdpClient` and
+  `SocketUdpClient`: inside a Fiber it suspends via Revolt / `Workerman\Timer`
+  (one-shot) instead of `usleep`; `SocketUdpClient::send()` polls replies with
+  non-blocking `socket_select()` and yields between polls instead of one 10 s
+  blocking select. CLI / non-Fiber callers keep a bounded blocking fallback;
+  `ProductionWaiter` remains as the explicit blocking choice. Seam tests in
+  `CooperativeWaiterTest`.
 - AUTH now follows a live-verified ENCRYPT handshake (`ENCRYPT user=..&type=1`
   -> `209 <salt> ENCRYPTION ENABLED`, key `md5(api_key . salt)`, AES-128-ECB) so
   the API key never travels in the clear; new `AnidbCipher`,

@@ -17,7 +17,8 @@ namespace Phlix\Anidb\Udp;
  * flood-protection delays without blocking the request worker when a non-blocking
  * implementation (e.g. Workerman Timer, background task) is available in the host.
  *
- * The production implementation ({@see ProductionWaiter}) uses blocking `usleep`
+ * The default ({@see CooperativeWaiter}) yields to the event loop;
+ * {@see ProductionWaiter} is the explicit blocking `usleep`
  * and is suitable for contexts where blocking is acceptable (e.g. CLI, worker
  * processes that are dedicated to UDP I/O). The seam lets tests use a no-op
  * waiter so flood-interval logic can be exercised without real wall-clock delays.

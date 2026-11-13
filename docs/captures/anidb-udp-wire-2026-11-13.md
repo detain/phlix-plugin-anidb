@@ -51,3 +51,12 @@ confirms the client's existing 504 handling (`AUTH` failure, no session, no
 retry loop). The remaining captures are blocked on the owner registering a
 client name at AniDB (and then setting it in the client's `AUTH` line); until
 then the "Not captured" list above stands.
+
+## Deferred-gated rows
+
+- `deferred-gated:ANI-S20 capture=multi-entry-ANIME-231-continuation` — the
+  drain-vs-demux wording for a multi-entry `ANIME` 231 continuation stays
+  neutral. The shipped behaviour (drain 2xx result frames that cannot answer
+  the pending verb, inside the bounded budget; red-first desync tests in
+  `SocketUdpClientTest`) asserts no 231 shape. Blocked on AniDB client-name
+  registration (`504 CLIENT BANNED` above); no further AUTH was attempted.

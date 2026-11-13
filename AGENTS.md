@@ -5,13 +5,13 @@ AniDB metadata-provider plugin for [Phlix](https://github.com/detain/phlix-serve
 ## Commands
 
 ```bash
-composer install               # install deps (phpunit ^10, phpstan ^2.2, detain/phlix-shared ^0.52.0)
+composer install               # install deps (phpunit ^12.5, phpstan ^2.2, detain/phlix-shared ^0.52.0)
 vendor/bin/phpunit             # run the Unit suite (config in phpunit.xml)
 vendor/bin/phpunit --testdox   # verbose output
 vendor/bin/phpstan analyse --no-progress   # static analysis, level 9 over ALL of src/ — zero ignoreErrors, zero excludes (phpstan.neon)
 php scripts/security-audit-check.php       # security gate: composer audit over the whole lock
 ```
-CI mirrors this via `.github/workflows/test.yml` (`phpunit` job on PHP 8.3 + 8.4, a `phpstan` job, and a blocking `composer-audit` job on push and pull_request).
+CI mirrors this via `.github/workflows/test.yml` (`phpunit` job on PHP 8.3 + 8.4 + 8.5, a `phpstan` job, and a blocking `composer-audit` job on push and pull_request).
 
 ## Architecture
 

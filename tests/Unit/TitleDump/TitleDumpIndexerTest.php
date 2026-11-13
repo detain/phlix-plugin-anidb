@@ -13,6 +13,7 @@ namespace Phlix\Anidb\Tests\Unit\TitleDump;
 use Phlix\Anidb\AnimeResponseParser;
 use Phlix\Anidb\TitleDump\TitleDumpIndexer;
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * Unit tests for TitleDumpIndexer.
@@ -153,9 +154,7 @@ DAT;
         ];
     }
 
-    /**
-     * @dataProvider ceilingAidProvider
-     */
+    #[DataProvider('ceilingAidProvider')]
     public function test_parse_drops_aid_violating_the_shared_ceiling(string $aidColumn): void
     {
         $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
@@ -584,9 +583,7 @@ DAT;
         ];
     }
 
-    /**
-     * @dataProvider illegalDumpUrlProvider
-     */
+    #[DataProvider('illegalDumpUrlProvider')]
     public function test_constructor_refuses_non_http_scheme_before_any_fetch(string $url): void
     {
         $thrown = null;

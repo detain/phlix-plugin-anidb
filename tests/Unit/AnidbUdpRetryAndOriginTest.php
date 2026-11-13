@@ -15,6 +15,7 @@ use Phlix\Anidb\Udp\UdpClient;
 use Phlix\Anidb\Udp\UdpClientInterface;
 use Phlix\Anidb\Udp\WaiterInterface;
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * Tests for 506 re-auth retry (B2), origin validation (S2/S3), and
@@ -183,9 +184,8 @@ final class AnidbUdpRetryAndOriginTest extends TestCase
     /**
      * S5: picname values `../../etc`, `http://evil/x`, empty → poster_url
      * must be null in returned metadata.
-     *
-     * @dataProvider picnameWhitelistProvider
      */
+    #[DataProvider('picnameWhitelistProvider')]
     public function test_poster_url_is_null_for_invalid_picname(
         ?string $picname,
         ?string $expectedPosterUrl,

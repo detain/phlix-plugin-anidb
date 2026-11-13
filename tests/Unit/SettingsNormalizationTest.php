@@ -29,6 +29,7 @@ use Phlix\Anidb\Udp\UdpClient;
 use Phlix\Anidb\Udp\UdpClientInterface;
 use Phlix\Anidb\Udp\WaiterInterface;
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 final class SettingsNormalizationTest extends TestCase
 {
@@ -228,9 +229,7 @@ final class SettingsNormalizationTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider booleanCoercionProvider
-     */
+    #[DataProvider('booleanCoercionProvider')]
     public function test_use_title_dump_normalizes_to_a_declared_bool(mixed $stored, bool $expected): void
     {
         $settings = $this->settingsOf(['use_title_dump' => $stored]);

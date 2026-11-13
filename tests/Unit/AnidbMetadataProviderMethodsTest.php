@@ -16,15 +16,14 @@ use Phlix\Anidb\Udp\UdpClient;
 use Phlix\Anidb\Udp\UdpClientInterface;
 use Phlix\Anidb\Udp\WaiterInterface;
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * Additional tests for AnidbMetadataProvider methods.
  */
 final class AnidbMetadataProviderMethodsTest extends TestCase
 {
-    /**
-     * @dataProvider mapTypeProvider
-     */
+    #[DataProvider('mapTypeProvider')]
     public function test_map_type_normalizes_type_strings(string $input, ?string $expected): void
     {
         $provider = new AnidbMetadataProvider([
@@ -66,9 +65,7 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider validateImageFilenameProvider
-     */
+    #[DataProvider('validateImageFilenameProvider')]
     public function test_validate_image_filename(mixed $picname, ?string $expected): void
     {
         $provider = new AnidbMetadataProvider([
@@ -470,9 +467,7 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
         $this->assertSame(42, $provider->resolveAidByTitle('Known Anime'));
     }
 
-    /**
-     * @dataProvider mapAnimeStatusProvider
-     */
+    #[DataProvider('mapAnimeStatusProvider')]
     public function test_map_anime_status_various_date_scenarios(
         int $startDate,
         int $endDate,
@@ -530,9 +525,8 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
      * @param int   $dateflags raw amask field-1 bitmask
      * @param bool  $isMovie   parsed movie flag
      * @param string $expected status string
-     *
-     * @dataProvider mapAnimeStatusFlagsProvider
      */
+    #[DataProvider('mapAnimeStatusFlagsProvider')]
     public function test_map_anime_status_consults_dateflags_with_movie_fallback(
         int $startDate,
         int $endDate,

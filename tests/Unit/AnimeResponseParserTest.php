@@ -12,6 +12,7 @@ namespace Phlix\Anidb\Tests\Unit;
 
 use Phlix\Anidb\AnimeResponseParser;
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * Unit tests for AnimeResponseParser.
@@ -179,9 +180,7 @@ final class AnimeResponseParserTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider absentTempRatingProvider
-     */
+    #[DataProvider('absentTempRatingProvider')]
     public function test_parse_temp_rating_without_a_value_is_null(string $column): void
     {
         $response = $this->buildFullResponse(['temp_rating' => $column]);
@@ -209,9 +208,7 @@ final class AnimeResponseParserTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider nineteenPlusGarbageProvider
-     */
+    #[DataProvider('nineteenPlusGarbageProvider')]
     public function test_parse_is_18plus_ignores_garbage_digit_columns(string $column): void
     {
         $response = $this->buildFullResponse(['is_18plus' => $column]);

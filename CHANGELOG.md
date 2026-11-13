@@ -17,6 +17,14 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Changed
+- Dependency upgrade (dev tooling only, no runtime change): PHPUnit ^10 -> ^12.5
+  (data providers migrated from `@dataProvider` annotations to
+  `#[DataProvider]` attributes; tests that assert on `error_log()` output now
+  point the sink inside the test because PHPUnit 12 captures it after
+  `setUp()`), phpstan 2.3.5, CI actions bumped (`actions/checkout@v7`,
+  `shivammathur/setup-php` 2.40.0, Codacy reporter already latest), CI matrix
+  adds PHP 8.5, Dependabot config added. `detain/phlix-shared` stays pinned at
+  ^0.52.0 (shared-contract pin, not changed here).
 - Review minors sweep: the ANI-S12 cache-dir validation (relative / symlink /
   world-writable / foreign-owner refusals) moved into `CacheDirGuard`, so the
   prod-only `fallbackTempBase` test property is gone and the foreign-owner

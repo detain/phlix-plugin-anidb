@@ -14,6 +14,7 @@ use Phlix\Anidb\AnidbMetadataProvider;
 use Phlix\Anidb\Dto\AnimeDto;
 use Phlix\Shared\Metadata\MetadataSourceInterface;
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * Unit tests for the AnidbMetadataProvider plugin.
@@ -23,9 +24,7 @@ use PHPUnit\Framework\TestCase;
  */
 final class AnidbMetadataProviderTest extends TestCase
 {
-    /**
-     * @dataProvider filenameProvider
-     */
+    #[DataProvider('filenameProvider')]
     public function test_extracts_anime_name_from_various_release_naming_patterns(
         string $input,
         ?string $expectedTitle
@@ -167,9 +166,7 @@ final class AnidbMetadataProviderTest extends TestCase
         $this->assertSame([], $provider->subscribedEvents());
     }
 
-    /**
-     * @dataProvider statusMappingProvider
-     */
+    #[DataProvider('statusMappingProvider')]
     public function test_maps_anime_status_correctly(
         ?int $startDate,
         ?int $endDate,

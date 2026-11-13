@@ -17,6 +17,7 @@ use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
 use ReflectionClass;
 use RuntimeException;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * CONSEQUENCE tests for SM-0.3 — the AniDB title dump never populated because
@@ -67,9 +68,7 @@ final class TitleDumpUrlMigrationTest extends TestCase
     // STORED-VALUE FIX-UP
     // -------------------------------------------------------------------------
 
-    /**
-     * @dataProvider provideUrls
-     */
+    #[DataProvider('provideUrls')]
     public function test_resolve_migrates_only_insecure_anidb_urls(mixed $configured, string $expected): void
     {
         $this->assertSame($expected, TitleDumpUrlMigration::resolve($configured));

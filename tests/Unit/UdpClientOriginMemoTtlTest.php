@@ -63,6 +63,9 @@ final class UdpClientOriginMemoTtlTest extends TestCase
      */
     private function clientWithAllowList(UdpClientInterface $transport, array $allowedHosts): UdpClient
     {
+        // PHPUnit 12 redirects error_log() to its own capture file after
+        // setUp(), so the per-test sink must be (re)pointed inside the test.
+        ini_set('error_log', $this->logFile);
         return new UdpClient(
             ['username' => 'testuser', 'api_key' => 'testkey'],
             $transport,

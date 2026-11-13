@@ -14,6 +14,7 @@ use Phlix\Anidb\Udp\UdpClient;
 use Phlix\Anidb\Udp\UdpClientInterface;
 use Phlix\Anidb\Udp\WaiterInterface;
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * Drives the AUTH / command path of {@see UdpClient} through a FAKE transport
@@ -64,9 +65,8 @@ final class AnidbUdpSeamTest extends TestCase
     /**
      * B1 friendly-throw path: a 5xx AUTH reply throws the friendly,
      * code-specific \RuntimeException returned by parseAuthFailure().
-     *
-     * @dataProvider authFailureProvider
      */
+    #[DataProvider('authFailureProvider')]
     public function test_authenticate_throws_friendly_runtime_exception_on_failure_response(
         string $cannedResponse,
         string $expectedMessageFragment
@@ -187,9 +187,8 @@ final class AnidbUdpSeamTest extends TestCase
     /**
      * S1b flood protection: verify enforceFloodProtection is called and waiter
      * receives the correct computed wait time based on elapsed time since last send.
-     *
-     * @dataProvider floodWaitTimeProvider
      */
+    #[DataProvider('floodWaitTimeProvider')]
     public function test_flood_protection_calls_waiter_with_correct_time(
         float $elapsedSinceLastSend,
         ?float $expectedWaitTime,
@@ -332,7 +331,7 @@ final class AnidbUdpSeamTest extends TestCase
         ];
     }
 
-    /** @dataProvider pingReplyShapes */
+    #[DataProvider('pingReplyShapes')]
     public function test_ping_ignores_any_reply_shape_and_keeps_session(?string $reply): void
     {
         $udp = new FakeUdpClient(['200 SESSION_KEY LOGIN ACCEPTED', $reply]);
@@ -605,9 +604,7 @@ final class AnidbUdpSeamTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider banArmProvider
-     */
+    #[DataProvider('banArmProvider')]
     public function test_parse_auth_failure_ban_arm_redacts_session_key_and_collapses_whitespace(
         string $code,
         string $label
@@ -624,9 +621,7 @@ final class AnidbUdpSeamTest extends TestCase
         );
     }
 
-    /**
-     * @dataProvider banArmProvider
-     */
+    #[DataProvider('banArmProvider')]
     public function test_parse_auth_failure_ban_arm_bounds_oversized_detail(string $code, string $label): void
     {
         $client = $this->makeUdpClient(new FakeUdpClient([]), new NoOpWaiter());
@@ -642,9 +637,7 @@ final class AnidbUdpSeamTest extends TestCase
         );
     }
 
-    /**
-     * @dataProvider banArmProvider
-     */
+    #[DataProvider('banArmProvider')]
     public function test_parse_auth_failure_ban_arm_without_detail_has_no_dangling_separator(
         string $code,
         string $label

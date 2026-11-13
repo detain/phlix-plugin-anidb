@@ -5,12 +5,12 @@ AniDB metadata-provider plugin for [Phlix](https://github.com/detain/phlix-serve
 ## Commands
 
 ```bash
-composer install               # install deps (incl. phpunit ^10, phpstan ^2.2)
+composer install               # install deps (incl. phpunit ^12.5, phpstan ^2.2)
 vendor/bin/phpunit             # run the Unit suite (phpunit.xml)
 vendor/bin/phpunit --testdox   # verbose, human-readable output
 vendor/bin/phpstan analyse --no-progress   # static analysis, level 9 (phpstan.neon)
 ```
-CI runs these on push and pull_request via `.github/workflows/test.yml` (`phpunit` job on PHP 8.3 + 8.4, a `phpstan` job, and a blocking `composer-audit` job).
+CI runs these on push and pull_request via `.github/workflows/test.yml` (`phpunit` job on PHP 8.3 + 8.4 + 8.5, a `phpstan` job, and a blocking `composer-audit` job).
 
 ```bash
 vendor/bin/phpunit tests/Unit/AnidbMetadataProviderTest.php          # run a single test file

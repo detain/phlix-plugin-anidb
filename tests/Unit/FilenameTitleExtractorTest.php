@@ -12,6 +12,7 @@ namespace Phlix\Anidb\Tests\Unit;
 
 use Phlix\Anidb\Parser\FilenameTitleExtractor;
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * Unit tests for FilenameTitleExtractor.
@@ -28,9 +29,7 @@ final class FilenameTitleExtractorTest extends TestCase
         $this->extractor = new FilenameTitleExtractor();
     }
 
-    /**
-     * @dataProvider filenameProvider
-     */
+    #[DataProvider('filenameProvider')]
     public function test_extracts_anime_name_from_various_release_naming_patterns(
         string $input,
         ?string $expectedTitle

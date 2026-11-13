@@ -14,6 +14,7 @@ use Phlix\Anidb\Udp\UdpClient;
 use Phlix\Anidb\Udp\UdpClientInterface;
 use Phlix\Anidb\Udp\WaiterInterface;
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
  * Pins the fail-fast credential guard at the entry of {@see UdpClient::authenticate()}.
@@ -57,9 +58,7 @@ final class UdpClientCredentialGuardTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider unusableSettingsProvider
-     */
+    #[DataProvider('unusableSettingsProvider')]
     public function test_authenticate_throws_before_the_transport_sees_bytes(array $settings): void
     {
         $transport = new GuardTransport();
@@ -79,9 +78,7 @@ final class UdpClientCredentialGuardTest extends TestCase
         $this->assertNull($this->sessionKeyOf($client));
     }
 
-    /**
-     * @dataProvider unusableSettingsProvider
-     */
+    #[DataProvider('unusableSettingsProvider')]
     public function test_lazy_auth_via_sendCommand_also_guarded(array $settings): void
     {
         $transport = new GuardTransport();
@@ -108,9 +105,8 @@ final class UdpClientCredentialGuardTest extends TestCase
     /**
      * The missing-or-empty list names each unusable field by its exact
      * form label — never a raw setting key, never "API password".
-     *
-     * @dataProvider missingListProvider
      */
+    #[DataProvider('missingListProvider')]
     public function test_missing_list_names_exact_form_labels(array $settings, string $expectedTail): void
     {
         $client = $this->makeClient($settings, new GuardTransport());

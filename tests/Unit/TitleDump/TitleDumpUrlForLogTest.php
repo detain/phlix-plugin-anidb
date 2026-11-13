@@ -33,6 +33,7 @@ use Phlix\Anidb\AnidbMetadataProvider;
 use Phlix\Anidb\TitleDump\TitleDumpIndexer;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 final class TitleDumpUrlForLogTest extends TestCase
 {
@@ -81,9 +82,7 @@ final class TitleDumpUrlForLogTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider urlShapesProvider
-     */
+    #[DataProvider('urlShapesProvider')]
     public function test_url_for_log_scrubs_userinfo_by_construction(string $input, string $expected): void
     {
         $this->assertSame($expected, TitleDumpIndexer::urlForLog($input));

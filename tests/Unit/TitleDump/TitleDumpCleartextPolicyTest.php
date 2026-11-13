@@ -26,6 +26,7 @@ namespace Phlix\Anidb\Tests\Unit\TitleDump;
 
 use Phlix\Anidb\TitleDump\TitleDumpIndexer;
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 final class TitleDumpCleartextPolicyTest extends TestCase
 {
@@ -82,6 +83,9 @@ final class TitleDumpCleartextPolicyTest extends TestCase
      */
     private function attempt(string $url): array
     {
+        // PHPUnit 12 redirects error_log() to its own capture file after
+        // setUp(), so the per-test sink must be (re)pointed inside the test.
+        ini_set('error_log', $this->dir . '/error.log');
         $calls = 0;
         $httpClient = static function (string $url, callable $onResult) use (&$calls): void {
             $calls++;
@@ -132,9 +136,7 @@ final class TitleDumpCleartextPolicyTest extends TestCase
         ];
     }
 
-    /**
-     * @dataProvider nonOptInValues
-     */
+    #[DataProvider('nonOptInValues')]
     public function test_onlyTheExactOptInValueUnlocksCleartext(string $value): void
     {
         putenv(TitleDumpIndexer::ALLOW_HTTP_DUMP_MIRROR_ENV . '=' . $value);

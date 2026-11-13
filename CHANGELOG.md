@@ -24,6 +24,12 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
   `201 <chal> CHALLENGE` / `auth=md5(...)` leg (ANI-S21) is removed: a live
   capture showed no such reply exists. Wire capture recorded (redacted) in
   `docs/captures/anidb-udp-wire-2026-11-13.md` (ANI-S19/ANI-S21).
+- `SocketUdpClient` now drains stale 2xx result frames: while waiting for the
+  expected result code, a 2xx frame that provably belongs to an earlier command
+  (e.g. a late `ANIME` reply arriving while `ANIMEDESC` is pending) is discarded
+  inside the same bounded wait budget instead of being returned as the answer
+  (ANI-S20). Whether the real multi-entry 231 continuation needs demux by
+  session key is uncaptured (needs an authenticated session).
 - PING is now wire-verified: the reply is `300 PONG` (a result frame, not
   ACK-only), so no result-wait exemption is needed; `PING`/`ENCRYPT` join the
   expected-result-code table and the fabricated `200 PONG` fixture is replaced

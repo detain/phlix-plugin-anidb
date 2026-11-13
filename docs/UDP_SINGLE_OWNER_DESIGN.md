@@ -1,7 +1,8 @@
 # Single UDP owner / cross-process flood accounting (ANI-2 / ANI-S23)
 
-Design note. Status: **architecture choice recorded; measurement leg
-owner-gated.** No bind-behaviour change has landed under this note.
+Design note. Status: **implemented and measured** (owner ruling 2026-11-13
+waived the production-box requirement; see "Bind measurement" for the exact
+environment). `SO_REUSEADDR` was dropped on the strength of that measurement.
 
 ## The problem
 
@@ -59,13 +60,23 @@ sequenced, not stacked blind.
 
 ## Bind measurement (done, local Linux 6.8)
 
-`scripts/udp-bind-probe.php` on this host (loopback; AniDB never contacted),
-two listener processes on one port, two datagrams sent:
+`scripts/udp-bind-probe.php`, run twice (2026-11-13): once at implementation
+time and again as the owner-ruled re-measurement. Environment, stated
+honestly: the development/orchestration box itself (Ubuntu 24.04.5 LTS, kernel
+6.8.0-138-generic, PHP 8.3.6 NTS, ext-sockets), **not** the production worker
+host; two separate PHP processes bound to `0.0.0.0:19431`, datagrams sent from
+a third process over `127.0.0.1`; AniDB never contacted. Re-run result: 8
+datagrams sent sequentially to two listeners (each listener exits after its
+first receipt):
 
 | SO_REUSEADDR | 2nd bind | delivery |
 |--------------|----------|----------|
 | off | `Address already in use` | only the first listener receives |
 | on  | succeeds (same port shared) | datagrams are split across both processes |
+
+Linux UDP delivery semantics for this case are kernel-level, not host-specific,
+but a different kernel or a non-Linux production OS could differ; re-run the
+harness there if the deployment target changes.
 
 Conclusion: with `SO_REUSEADDR` two workers silently share one source port and
 the kernel hands a reply to whichever process it picks, so a worker can lose

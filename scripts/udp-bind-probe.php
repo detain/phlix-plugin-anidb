@@ -1,8 +1,8 @@
 <?php
 
 /**
- * Measurement harness for ANI-S23 (OWNER-GATED: run on the production host
- * only when the owner provides access; it is not run by CI or phpunit).
+ * Measurement harness for ANI-S23 (run by hand on the box under test; not run
+ * by CI or phpunit; results recorded in docs/UDP_SINGLE_OWNER_DESIGN.md).
  *
  * Usage:
  *   php scripts/udp-bind-probe.php listen <port> <reuse:0|1> <label> <seconds>

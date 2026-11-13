@@ -64,7 +64,6 @@ final class CacheDirValidationTest extends TestCase
     private function cacheDirOf(AnidbMetadataProvider $provider): string
     {
         $reflection = new \ReflectionProperty($provider, 'cacheDir');
-        $reflection->setAccessible(true);
 
         /** @var string $value */
         $value = $reflection->getValue($provider);

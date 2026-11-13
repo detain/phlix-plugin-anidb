@@ -208,7 +208,6 @@ final class AnidbUdpSeamTest extends TestCase
         // Simulate elapsed time since last send by directly setting lastSendTimestamp.
         $reflection = new \ReflectionClass($client);
         $lastSendProp = $reflection->getProperty('lastSendTimestamp');
-        $lastSendProp->setAccessible(true);
         $now = microtime(true);
         $lastSendProp->setValue($client, $now - $elapsedSinceLastSend);
 
@@ -310,7 +309,6 @@ final class AnidbUdpSeamTest extends TestCase
         // Access the private ping() method via reflection and call it
         $reflection = new \ReflectionClass($client);
         $pingMethod = $reflection->getMethod('ping');
-        $pingMethod->setAccessible(true);
         $pingMethod->invoke($client);
 
         // Verify PING was sent
@@ -339,7 +337,6 @@ final class AnidbUdpSeamTest extends TestCase
         $client->authenticate();
 
         $m = (new \ReflectionClass($client))->getMethod('ping');
-        $m->setAccessible(true);
         $m->invoke($client);
 
         $this->assertTrue($client->isAuthenticated());
@@ -355,7 +352,6 @@ final class AnidbUdpSeamTest extends TestCase
 
         $reflection = new \ReflectionClass($client);
         $method = $reflection->getMethod('needsKeepAlive');
-        $method->setAccessible(true);
 
         $this->assertFalse($method->invoke($client));
     }
@@ -376,7 +372,6 @@ final class AnidbUdpSeamTest extends TestCase
 
         $reflection = new \ReflectionClass($client);
         $method = $reflection->getMethod('isValidReplyOrigin');
-        $method->setAccessible(true);
 
         // With explicit validOriginHosts=['api.anidb.net'], api.anidb.net:9000 should be valid
         $result = $method->invoke($client, 'api.anidb.net', 9000);
@@ -397,7 +392,6 @@ final class AnidbUdpSeamTest extends TestCase
 
         $reflection = new \ReflectionClass($client);
         $method = $reflection->getMethod('isValidReplyOrigin');
-        $method->setAccessible(true);
 
         // Wrong port should be rejected
         $result = $method->invoke($client, 'api.anidb.net', 9001);
@@ -418,7 +412,6 @@ final class AnidbUdpSeamTest extends TestCase
 
         $reflection = new \ReflectionClass($client);
         $method = $reflection->getMethod('isValidReplyOrigin');
-        $method->setAccessible(true);
 
         // Wrong host should be rejected
         $result = $method->invoke($client, '10.0.0.1', 9000);
@@ -440,7 +433,6 @@ final class AnidbUdpSeamTest extends TestCase
 
         $reflection = new \ReflectionClass($client);
         $method = $reflection->getMethod('resolveValidOriginHosts');
-        $method->setAccessible(true);
 
         // First call
         $result1 = $method->invoke($client);

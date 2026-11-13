@@ -80,7 +80,6 @@ final class UdpClientOriginMemoTtlTest extends TestCase
     private function resolveLazily(UdpClient $client): array
     {
         $method = new \ReflectionMethod($client, 'resolveValidOriginHosts');
-        $method->setAccessible(true);
 
         /** @var list<string> $hosts */
         $hosts = $method->invoke($client);
@@ -94,7 +93,6 @@ final class UdpClientOriginMemoTtlTest extends TestCase
     private function pokeProperty(UdpClient $client, string $property, int $seconds): void
     {
         $ref = new \ReflectionProperty($client, $property);
-        $ref->setAccessible(true);
         $ref->setValue($client, $seconds);
     }
 

@@ -44,7 +44,6 @@ final class TitleDumpIndexerMethodsTest extends TestCase
 
         $reflection = new \ReflectionClass($indexer);
         $method = $reflection->getMethod('markerIsLive');
-        $method->setAccessible(true);
 
         $result = $method->invoke($indexer, $mtime);
 
@@ -78,7 +77,6 @@ final class TitleDumpIndexerMethodsTest extends TestCase
 
         $reflection = new \ReflectionClass($indexer);
         $method = $reflection->getMethod('describeMarkerType');
-        $method->setAccessible(true);
 
         $result = $method->invoke($indexer, $type, $markerPath);
 
@@ -107,7 +105,6 @@ final class TitleDumpIndexerMethodsTest extends TestCase
 
         $reflection = new \ReflectionClass($indexer);
         $method = $reflection->getMethod('inFlightMarkerPath');
-        $method->setAccessible(true);
 
         $result = $method->invoke($indexer);
 
@@ -121,7 +118,6 @@ final class TitleDumpIndexerMethodsTest extends TestCase
 
         $reflection = new \ReflectionClass($indexer);
         $method = $reflection->getMethod('indexFilePath');
-        $method->setAccessible(true);
 
         $result = $method->invoke($indexer);
 
@@ -136,7 +132,6 @@ final class TitleDumpIndexerMethodsTest extends TestCase
 
         $reflection = new \ReflectionClass($indexer);
         $method = $reflection->getMethod('defaultHttpClient');
-        $method->setAccessible(true);
 
         $receivedResult = 'not set';
         $callback = static function (?string $result) use (&$receivedResult): void {
@@ -166,7 +161,6 @@ final class TitleDumpIndexerMethodsTest extends TestCase
 
         $reflection = new \ReflectionClass($indexer);
         $method = $reflection->getMethod('fetch');
-        $method->setAccessible(true);
 
         $result = null;
         $callback = static function (?string $data) use (&$result): void {
@@ -195,7 +189,6 @@ final class TitleDumpIndexerMethodsTest extends TestCase
 
         $reflection = new \ReflectionClass($indexer);
         $method = $reflection->getMethod('fetch');
-        $method->setAccessible(true);
 
         $result = 'not called';
         $callback = static function (?string $data) use (&$result): void {
@@ -214,7 +207,6 @@ final class TitleDumpIndexerMethodsTest extends TestCase
 
         $reflection = new \ReflectionClass($indexer);
         $method = $reflection->getMethod('writeIndex');
-        $method->setAccessible(true);
 
         $result = $method->invoke($indexer, [['aid' => 1, 'titles' => []]]);
 
@@ -233,7 +225,6 @@ final class TitleDumpIndexerMethodsTest extends TestCase
 
             $reflection = new \ReflectionClass($indexer);
             $method = $reflection->getMethod('writeIndex');
-            $method->setAccessible(true);
 
             // Suppress the expected PHP warning from file_put_contents permission denied
             $result = @$method->invoke($indexer, [['aid' => 1, 'titles' => []]]);
@@ -263,7 +254,6 @@ final class TitleDumpIndexerMethodsTest extends TestCase
 
             $reflection = new \ReflectionClass($indexer);
             $method = $reflection->getMethod('writeIndex');
-            $method->setAccessible(true);
 
             $diagnostics = [];
             set_error_handler(static function (int $severity, string $message) use (&$diagnostics): bool {

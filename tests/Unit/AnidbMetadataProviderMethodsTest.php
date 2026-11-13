@@ -35,7 +35,6 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
 
         $reflection = new \ReflectionClass($provider);
         $method = $reflection->getMethod('mapType');
-        $method->setAccessible(true);
 
         $result = $method->invoke($provider, $input);
         $this->assertSame($expected, $result);
@@ -77,7 +76,6 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
 
         $reflection = new \ReflectionClass($provider);
         $method = $reflection->getMethod('validateImageFilename');
-        $method->setAccessible(true);
 
         $result = $method->invoke($provider, $picname);
         $this->assertSame($expected, $result);
@@ -482,7 +480,6 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
 
         $reflection = new \ReflectionClass($provider);
         $method = $reflection->getMethod('mapAnimeStatus');
-        $method->setAccessible(true);
 
         // M-ANIDB-21: the mapper boundary is the typed DTO, not a raw array.
         $anime = AnimeDto::fromParsedArray([
@@ -543,7 +540,6 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
 
         $reflection = new \ReflectionClass($provider);
         $method = $reflection->getMethod('mapAnimeStatus');
-        $method->setAccessible(true);
 
         $anime = AnimeDto::fromParsedArray([
             'start_date' => $startDate,
@@ -602,7 +598,6 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
 
         $reflection = new \ReflectionClass($provider);
         $method = $reflection->getMethod('resolveCacheDir');
-        $method->setAccessible(true);
 
         $result = $method->invoke($provider, [], '/explicit/cache/dir');
         $this->assertSame('/explicit/cache/dir', $result);
@@ -616,7 +611,6 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
 
         $reflection = new \ReflectionClass($provider);
         $method = $reflection->getMethod('resolveCacheDir');
-        $method->setAccessible(true);
 
         $result = $method->invoke($provider, ['cache_dir' => '/settings/cache/dir'], null);
         $this->assertSame('/settings/cache/dir', $result);
@@ -630,7 +624,6 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
 
         $reflection = new \ReflectionClass($provider);
         $method = $reflection->getMethod('resolveCacheDir');
-        $method->setAccessible(true);
 
         $result = $method->invoke($provider, [], null);
         $this->assertSame(sys_get_temp_dir() . '/phlix-plugin-anidb', $result);
@@ -644,7 +637,6 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
 
         $reflection = new \ReflectionClass($provider);
         $method = $reflection->getMethod('resolveCacheDir');
-        $method->setAccessible(true);
 
         // Explicit arg should win over settings
         $result = $method->invoke($provider, ['cache_dir' => '/settings/cache'], '/explicit/cache');
@@ -694,7 +686,6 @@ final class AnidbMetadataProviderMethodsTest extends TestCase
         // (so fetchAnimeDetails does not retry it).
         $reflection = new \ReflectionClass($provider);
         $method = $reflection->getMethod('describeAnime');
-        $method->setAccessible(true);
 
         $result = $method->invoke($provider, 1);
         $this->assertNull($result['text']);

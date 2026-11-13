@@ -95,7 +95,6 @@ final class SettingsNormalizationTest extends TestCase
         [$provider] = $this->provider($settings);
 
         $reflection = new \ReflectionProperty($provider, 'settings');
-        $reflection->setAccessible(true);
 
         /** @var array<string, mixed> $value */
         $value = $reflection->getValue($provider);
@@ -151,7 +150,6 @@ final class SettingsNormalizationTest extends TestCase
         $this->withoutPhpDiagnostics(function (): void {
             $provider = new AnidbMetadataProvider(['username' => 'only-user']);
             $reflection = new \ReflectionMethod($provider, 'findAidByTitle');
-            $reflection->setAccessible(true);
 
             try {
                 // Declared reads first (:767 truthiness), then the credential
@@ -183,7 +181,6 @@ final class SettingsNormalizationTest extends TestCase
                     'use_title_dump' => 'not-a-bool',
                 ]);
                 $reflection = new \ReflectionProperty($provider, 'settings');
-                $reflection->setAccessible(true);
 
                 /** @var array<string, mixed> $value */
                 $value = $reflection->getValue($provider);
@@ -306,12 +303,10 @@ final class SettingsNormalizationTest extends TestCase
         );
 
         $session = new \ReflectionProperty($provider, 'udpSession');
-        $session->setAccessible(true);
         /** @var UdpClient $udpSession */
         $udpSession = $session->getValue($provider);
 
         $sessionSettings = new \ReflectionProperty(UdpClient::class, 'settings');
-        $sessionSettings->setAccessible(true);
         /** @var array<string, mixed> $handed */
         $handed = $sessionSettings->getValue($udpSession);
 

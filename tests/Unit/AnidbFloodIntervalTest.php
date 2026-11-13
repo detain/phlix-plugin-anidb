@@ -41,7 +41,6 @@ final class AnidbFloodIntervalTest extends TestCase
     private static function setPrivateProperty(UdpClient $client, string $name, mixed $value): void
     {
         $property = (new \ReflectionClass($client))->getProperty($name);
-        $property->setAccessible(true);
         $property->setValue($client, $value);
     }
 

@@ -38,7 +38,6 @@ final class AnidbMetadataProviderTest extends TestCase
 
         $reflection = new \ReflectionClass($provider);
         $method = $reflection->getMethod('extractAnimeName');
-        $method->setAccessible(true);
 
         $result = $method->invoke($provider, $input);
 
@@ -182,7 +181,6 @@ final class AnidbMetadataProviderTest extends TestCase
 
         $reflection = new \ReflectionClass($provider);
         $method = $reflection->getMethod('mapAnimeStatus');
-        $method->setAccessible(true);
 
         // M-ANIDB-21: the mapper boundary is the typed DTO, not a raw array.
         $anime = AnimeDto::fromParsedArray([
@@ -224,7 +222,6 @@ final class AnidbMetadataProviderTest extends TestCase
 
         $reflection = new \ReflectionClass($provider);
         $method = $reflection->getMethod('mapToMetadataReturn');
-        $method->setAccessible(true);
 
         $anime = [
             'aid' => 1,
@@ -281,7 +278,6 @@ final class AnidbMetadataProviderTest extends TestCase
 
         $reflection = new \ReflectionClass($provider);
         $method = $reflection->getMethod('parseAnimeResponse');
-        $method->setAccessible(true);
 
         $rawResponse = "230 ANIME\n" . implode('|', [
             '1',       // 0: aid
@@ -346,7 +342,6 @@ final class AnidbMetadataProviderTest extends TestCase
 
         $reflection = new \ReflectionClass($provider);
         $method = $reflection->getMethod('parseAnimeResponse');
-        $method->setAccessible(true);
 
         // Build a 230 response with romaji "Fate/stay night" (contains a slash)
         $rawResponse = "230 ANIME\n" . implode('|', [

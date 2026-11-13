@@ -126,7 +126,6 @@ final class AnidbMetadataProviderAdapterTest extends TestCase
         // this is the exact call onEnable() makes after authenticate().
         $provider = $this->makeProvider();
         $ref = new \ReflectionMethod($provider, 'registerWithMetadataManager');
-        $ref->setAccessible(true);
         $ref->invoke($provider, $container);
 
         $this->assertNotNull($manager->registered, 'registerProvider() was not called');
@@ -148,7 +147,6 @@ final class AnidbMetadataProviderAdapterTest extends TestCase
 
         $provider = $this->makeProvider();
         $ref = new \ReflectionMethod($provider, 'registerWithMetadataManager');
-        $ref->setAccessible(true);
 
         // Must not throw.
         $ref->invoke($provider, $container);
@@ -200,7 +198,6 @@ final class AnidbMetadataProviderAdapterTest extends TestCase
 
         $ref = new \ReflectionClass(AnidbMetadataProviderAdapter::class);
         $method = $ref->getMethod('parseAid');
-        $method->setAccessible(true);
 
         // Valid cases - positive integers should parse correctly
         $this->assertSame(1, $method->invoke($adapter, '1'));
@@ -214,7 +211,6 @@ final class AnidbMetadataProviderAdapterTest extends TestCase
 
         $ref = new \ReflectionClass(AnidbMetadataProviderAdapter::class);
         $method = $ref->getMethod('parseAid');
-        $method->setAccessible(true);
 
         // Invalid cases
         $this->assertNull($method->invoke($adapter, ''));
@@ -232,7 +228,6 @@ final class AnidbMetadataProviderAdapterTest extends TestCase
 
         $ref = new \ReflectionClass(AnidbMetadataProviderAdapter::class);
         $method = $ref->getMethod('stringOr');
-        $method->setAccessible(true);
 
         $this->assertSame('actual value', $method->invoke($adapter, 'actual value', 'fallback'));
     }
@@ -243,7 +238,6 @@ final class AnidbMetadataProviderAdapterTest extends TestCase
 
         $ref = new \ReflectionClass(AnidbMetadataProviderAdapter::class);
         $method = $ref->getMethod('stringOr');
-        $method->setAccessible(true);
 
         $this->assertSame('fallback', $method->invoke($adapter, null, 'fallback'));
     }
@@ -254,7 +248,6 @@ final class AnidbMetadataProviderAdapterTest extends TestCase
 
         $ref = new \ReflectionClass(AnidbMetadataProviderAdapter::class);
         $method = $ref->getMethod('stringOr');
-        $method->setAccessible(true);
 
         $this->assertSame('fallback', $method->invoke($adapter, '', 'fallback'));
     }

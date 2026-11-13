@@ -120,7 +120,6 @@ final class AnidbMapperDtoTest extends TestCase
     private static function invokePrivate(AnidbMetadataProvider $provider, string $method, mixed ...$args): mixed
     {
         $reflection = new \ReflectionMethod($provider, $method);
-        $reflection->setAccessible(true);
 
         return $reflection->invoke($provider, ...$args);
     }
@@ -285,7 +284,6 @@ final class AnidbMapperDtoTest extends TestCase
         $sent = count($transport->commands);
 
         $ref = new \ReflectionProperty($provider, 'metadataMemo');
-        $ref->setAccessible(true);
         $memo = $ref->getValue($provider);
         $memo[42]['expires'] = time() - 1;
         $ref->setValue($provider, $memo);

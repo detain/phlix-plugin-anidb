@@ -208,7 +208,6 @@ final class TitleDumpUrlMigrationTest extends TestCase
     private static function titleDumpUrlOf(AnidbMetadataProvider $provider): string
     {
         $managerProp = (new ReflectionClass($provider))->getProperty('titleDumpManager');
-        $managerProp->setAccessible(true);
         $manager = $managerProp->getValue($provider);
 
         if (!$manager instanceof TitleDumpManager) {
@@ -216,7 +215,6 @@ final class TitleDumpUrlMigrationTest extends TestCase
         }
 
         $urlProp = (new ReflectionClass($manager))->getProperty('titleDumpUrl');
-        $urlProp->setAccessible(true);
         $url = $urlProp->getValue($manager);
 
         return is_string($url) ? $url : '';

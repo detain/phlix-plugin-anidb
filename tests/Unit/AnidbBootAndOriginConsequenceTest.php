@@ -295,7 +295,6 @@ final class AnidbBootAndOriginConsequenceTest extends TestCase
     {
         $provider = new AnidbMetadataProvider(self::SETTINGS);
         $method = (new \ReflectionClass($provider))->getMethod('mapToMetadataReturn');
-        $method->setAccessible(true);
 
         $result = $method->invoke($provider, self::animeFixture('7.jpg'));
 

@@ -28,15 +28,12 @@ final class SocketUdpClientTest extends TestCase
         // Use reflection to verify the private fields
         $reflection = new \ReflectionClass($client);
         $hostProp = $reflection->getProperty('host');
-        $hostProp->setAccessible(true);
         $this->assertSame('api.anidb.net', $hostProp->getValue($client));
 
         $portProp = $reflection->getProperty('port');
-        $portProp->setAccessible(true);
         $this->assertSame(9000, $portProp->getValue($client));
 
         $localPortProp = $reflection->getProperty('localPort');
-        $localPortProp->setAccessible(true);
         $this->assertSame(9001, $localPortProp->getValue($client));
     }
 
@@ -46,15 +43,12 @@ final class SocketUdpClientTest extends TestCase
 
         $reflection = new \ReflectionClass($client);
         $hostProp = $reflection->getProperty('host');
-        $hostProp->setAccessible(true);
         $this->assertSame('custom.host.example.com', $hostProp->getValue($client));
 
         $portProp = $reflection->getProperty('port');
-        $portProp->setAccessible(true);
         $this->assertSame(12345, $portProp->getValue($client));
 
         $localPortProp = $reflection->getProperty('localPort');
-        $localPortProp->setAccessible(true);
         $this->assertSame(54321, $localPortProp->getValue($client));
     }
 
@@ -64,15 +58,12 @@ final class SocketUdpClientTest extends TestCase
 
         $reflection = new \ReflectionClass($client);
         $hostProp = $reflection->getProperty('host');
-        $hostProp->setAccessible(true);
         $this->assertSame('api.anidb.net', $hostProp->getValue($client));
 
         $portProp = $reflection->getProperty('port');
-        $portProp->setAccessible(true);
         $this->assertSame(9000, $portProp->getValue($client));
 
         $localPortProp = $reflection->getProperty('localPort');
-        $localPortProp->setAccessible(true);
         $this->assertSame(9001, $localPortProp->getValue($client));
     }
 
@@ -131,7 +122,6 @@ final class SocketUdpClientTest extends TestCase
             // Verify socket is created via reflection
             $reflection = new \ReflectionClass($client);
             $socketProp = $reflection->getProperty('socket');
-            $socketProp->setAccessible(true);
             $socket = $socketProp->getValue($client);
 
             $this->assertNotNull($socket);
@@ -171,7 +161,6 @@ final class SocketUdpClientTest extends TestCase
             // Verify socket is set after open
             $reflection = new \ReflectionClass($client);
             $socketProp = $reflection->getProperty('socket');
-            $socketProp->setAccessible(true);
             $this->assertNotNull($socketProp->getValue($client));
 
             $client->close();

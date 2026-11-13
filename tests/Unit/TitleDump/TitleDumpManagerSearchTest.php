@@ -245,9 +245,7 @@ final class TitleDumpManagerSearchTest extends TestCase
         $manager = new TitleDumpManager($this->tempDir, 'http://example.com/test.gz');
 
         $mint = new \ReflectionMethod($manager, 'canonicalTitleEntry');
-        $mint->setAccessible(true);
         $build = new \ReflectionMethod($manager, 'buildExactIndex');
-        $build->setAccessible(true);
 
         // The mint point owns lowering and length.
         $minted = $mint->invoke(null, ['title' => 'KaRei', 'type' => 'main', 'lang' => 'en']);

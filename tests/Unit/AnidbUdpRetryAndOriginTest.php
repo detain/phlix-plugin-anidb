@@ -199,7 +199,6 @@ final class AnidbUdpRetryAndOriginTest extends TestCase
 
         $reflection = new \ReflectionClass($provider);
         $method = $reflection->getMethod('mapToMetadataReturn');
-        $method->setAccessible(true);
 
         $anime = [
             'aid' => 1,
@@ -262,7 +261,6 @@ final class AnidbUdpRetryAndOriginTest extends TestCase
 
         $reflection = new \ReflectionClass($provider);
         $method = $reflection->getMethod('mapToMetadataReturn');
-        $method->setAccessible(true);
 
         $anime = [
             'aid' => 99,

@@ -377,7 +377,6 @@ DAT;
         $indexer = new TitleDumpIndexer('/tmp/cache', 'https://example.com/anime-titles.dat.gz');
 
         $method = new \ReflectionMethod(TitleDumpIndexer::class, 'indexMtimeIsFresh');
-        $method->setAccessible(true);
 
         $this->assertFalse($method->invoke($indexer, false), 'false mtime must never mean fresh');
         $this->assertFalse($method->invoke($indexer, time() + 1), 'future mtime must never mean fresh');
@@ -766,7 +765,6 @@ DAT;
             ]];
 
             $method = new \ReflectionMethod(TitleDumpIndexer::class, 'writeIndex');
-            $method->setAccessible(true);
 
             $this->assertFalse($method->invoke($indexer, $corrupt));
 
@@ -809,7 +807,6 @@ DAT;
             });
 
             $method = new \ReflectionMethod(TitleDumpIndexer::class, 'writeIndex');
-            $method->setAccessible(true);
 
             $this->assertFalse(
                 $method->invoke($indexer, [['aid' => 1, 'titles' => [['title' => 'X', 'type' => 'main', 'lang' => 'en']]]]),
@@ -854,7 +851,6 @@ DAT;
             });
 
             $method = new \ReflectionMethod(TitleDumpIndexer::class, 'writeIndex');
-            $method->setAccessible(true);
 
             $oldInode = @lstat($indexFile)['ino'];
 
@@ -890,7 +886,6 @@ DAT;
             });
 
             $method = new \ReflectionMethod(TitleDumpIndexer::class, 'writeIndex');
-            $method->setAccessible(true);
 
             $this->assertFalse(@$method->invoke($indexer, [['aid' => 1, 'titles' => []]]));
         } finally {

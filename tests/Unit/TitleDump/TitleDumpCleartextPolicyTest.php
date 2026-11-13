@@ -94,7 +94,6 @@ final class TitleDumpCleartextPolicyTest extends TestCase
         $indexer = new TitleDumpIndexer($this->dir, $url, $httpClient);
 
         $attempt = new \ReflectionMethod(TitleDumpIndexer::class, 'doDownloadAndIndex');
-        $attempt->setAccessible(true);
         $result = $attempt->invoke($indexer);
 
         return [

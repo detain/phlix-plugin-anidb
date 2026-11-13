@@ -267,7 +267,6 @@ final class TitleDumpManagerFreshnessTest extends TestCase
     private function resetFreshnessThrottle(TitleDumpManager $manager): void
     {
         $prop = new \ReflectionProperty(TitleDumpManager::class, 'lastFreshnessCheck');
-        $prop->setAccessible(true);
         $prop->setValue($manager, 0);
     }
 }

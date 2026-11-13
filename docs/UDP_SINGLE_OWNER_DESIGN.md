@@ -41,12 +41,35 @@ This shares the transport core with ANI-S22 (non-blocking contract, option
 choice still owner-gated, see `NONBLOCKING_DESIGN.md`); the two must be
 sequenced, not stacked blind.
 
-## Gated measurement (booked, not performed)
+## Implemented (ANI-S23)
 
-`deferred-gated:ANI-S23 measurement=two-process-same-port-udp-bind-receipt`
+- `UdpCoordinatorInterface` / `FileUdpCoordinator`: non-blocking `flock` owner
+  election on `<cache_dir>/anidb-udp-owner.lock` (kernel-released on owner
+  death, so a surviving worker takes over on its next call) and a shared
+  pacing ledger `<cache_dir>/anidb-udp-ledger` reserved under an exclusive
+  flock: every packet waits `max(local gate, ledger slot)`.
+- `UdpClient` takes the coordinator; the transport is opened only by the owner,
+  and `sendCommand()` returns `null` in non-owners (callers fall back to the
+  title dump / cache). Without a coordinator behaviour is unchanged.
+- `AnidbMetadataProvider` wires a `FileUdpCoordinator` on its cache dir when it
+  builds the default transport (injected transports stay standalone). If the
+  lock file cannot be created the coordinator degrades to standalone with one
+  log line rather than disabling AniDB.
+- Seam tests: `tests/Unit/UdpSingleOwnerTest.php`.
 
-Run `scripts/udp-bind-probe.php` on the production box (owner-held host
-access). It binds the same local port from two processes with and without
-`SO_REUSEADDR`, and records which process receives a datagram. The decision to
-drop (or keep) `SO_REUSEADDR` rides that result. Nothing asserting bind
-behaviour is added until the measurement exists.
+## Bind measurement (done, local Linux 6.8)
+
+`scripts/udp-bind-probe.php` on this host (loopback; AniDB never contacted),
+two listener processes on one port, two datagrams sent:
+
+| SO_REUSEADDR | 2nd bind | delivery |
+|--------------|----------|----------|
+| off | `Address already in use` | only the first listener receives |
+| on  | succeeds (same port shared) | datagrams are split across both processes |
+
+Conclusion: with `SO_REUSEADDR` two workers silently share one source port and
+the kernel hands a reply to whichever process it picks, so a worker can lose
+its own reply. `SocketUdpClient::open()` therefore no longer sets
+`SO_REUSEADDR`; a second process fails loudly or slides to another port, and
+the owner election above is what guarantees a single stable port. UDP has no
+TIME_WAIT, so a restart can rebind immediately without the option.

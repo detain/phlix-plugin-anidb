@@ -18,7 +18,7 @@ use Socket;
  * Wraps the timeout-bounded `socket_*` lifecycle (create / bind / sendto / select +
  * recvfrom / close). Compared to the original inline implementation:
  *
- * - AF_INET / SOCK_DGRAM / SOL_UDP socket, SO_REUSEADDR set;
+ * - AF_INET / SOCK_DGRAM / SOL_UDP socket, SO_REUSEADDR deliberately NOT set (ANI-S23);
  * - bound to a local port above 1024 (a preferred port, sliding across a small
  *   window if taken) to keep a stable source port for AniDB;
  * - send/receive waits bounded to 10 s via `socket_select()`; async-native by
@@ -164,7 +164,7 @@ final class SocketUdpClient implements UdpClientInterface, EncryptableTransportI
     /**
      * {@inheritDoc}
      *
-     * Creates the datagram socket, sets SO_REUSEADDR, binds to a local port
+     * Creates the datagram socket (no SO_REUSEADDR), binds to a local port
      * above 1024 (the preferred port, sliding forward across a small window if
      * it is already claimed), and applies 10s send/receive timeouts.
      */
@@ -179,8 +179,12 @@ final class SocketUdpClient implements UdpClientInterface, EncryptableTransportI
         }
         $this->socket = $socket;
 
-        // Reuse local port to avoid triggering AniDB's multi-port ban detection
-        socket_set_option($this->socket, SOL_SOCKET, SO_REUSEADDR, 1);
+        // ANI-S23: SO_REUSEADDR is deliberately NOT set. Measured on Linux
+        // 6.8 (docs/UDP_SINGLE_OWNER_DESIGN.md): with it, two processes bind
+        // the SAME UDP port and the kernel splits inbound datagrams between
+        // them, so a reply can land in the wrong process; without it the
+        // second bind fails loudly (EADDRINUSE). The single-owner election in
+        // UdpClient/FileUdpCoordinator is what guarantees one stable port.
 
         // Bind to a local port above 1024 (AniDB requires one stable source
         // port per session; per-packet ports trip its multi-port ban

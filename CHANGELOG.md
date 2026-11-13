@@ -17,6 +17,13 @@ describes dev-channel builds prior to `46cbb1d`, not an installed release.
 ## [Unreleased] — 0.4.x development line
 
 ### Changed
+- ANI-S23 / ANI-2: single UDP owner + cross-process flood accounting. New
+  `UdpCoordinatorInterface` / `FileUdpCoordinator` (flock owner election and a
+  shared pacing ledger in the cache dir); only the owner opens the AniDB socket
+  and non-owners fall back to the title dump. `SocketUdpClient` no longer sets
+  `SO_REUSEADDR` (measured: it lets two processes share a port and splits
+  replies). Seam tests in `UdpSingleOwnerTest`; measurement recorded in
+  `docs/UDP_SINGLE_OWNER_DESIGN.md`.
 - ANI-S22 / ANI-1: the non-blocking contract of `MetadataSourceInterface` is now
   true on the default path. New `CooperativeWaiter` (+ `CooperativeWaiterInterface`)
   is the default waiter for `AnidbMetadataProvider`, `UdpClient` and

@@ -78,11 +78,11 @@ phlix-plugin-anidb/
 
 **Implementation:** `UdpClient` MUST enforce a 4-second minimum delay between commands. It MUST reuse the same local UDP port.
 
-**Known gap (ANI-S23):** the 4-second gate is per process, but the host runs
-~14 workers, each with its own client, and AniDB counts per IP. Joint pacing
-and single-socket ownership are therefore not yet enforced; see
-`docs/UDP_SINGLE_OWNER_DESIGN.md`. Whether `SO_REUSEADDR` yields one shared
-source port across processes is unmeasured (owner-gated production-box probe).
+**Cross-process (ANI-S23, implemented):** the host runs ~14 workers but AniDB
+counts per IP, so a `flock` owner election (`FileUdpCoordinator`) lets exactly
+one process open the socket, and a shared pacing ledger spaces every packet
+host-wide. `SO_REUSEADDR` is not set (measured to split replies between
+processes); see `docs/UDP_SINGLE_OWNER_DESIGN.md`.
 
 ### 2.3 Session Lifecycle
 

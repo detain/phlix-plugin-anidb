@@ -17,6 +17,7 @@ use Phlix\Anidb\TitleDump\TitleDumpIndexer;
 use Phlix\Anidb\TitleDump\TitleDumpManager;
 use Phlix\Anidb\TitleDump\TitleDumpUrlMigration;
 use Phlix\Anidb\Udp\CooperativeWaiter;
+use Phlix\Anidb\Udp\FileUdpCoordinator;
 use Phlix\Anidb\Udp\SocketUdpClient;
 use Phlix\Anidb\Udp\UdpClient;
 use Phlix\Anidb\Udp\UdpClientInterface;
@@ -287,7 +288,21 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
         $this->filenameExtractor = $filenameExtractor ?? new FilenameTitleExtractor();
         $this->episodeExtractor = $episodeExtractor ?? new EpisodeExtractor();
         $this->titleDumpManager = $titleDumpManager;
-        $this->udpSession = $udpSession ?? new UdpClient($this->settings, $this->udpClient, $this->waiter);
+        // ANI-S23: with the default (production) transport, exactly one
+        // process host-wide owns the AniDB socket and all packets are paced
+        // against a shared ledger. Injected transports/sessions (tests, hosts
+        // with their own owner) stay standalone.
+        $coordinator = $udpSession === null && $udpClient === null
+            ? new FileUdpCoordinator($this->cacheDir)
+            : null;
+        $this->udpSession = $udpSession ?? new UdpClient(
+            $this->settings,
+            $this->udpClient,
+            $this->waiter,
+            null,
+            null,
+            $coordinator,
+        );
     }
 
     /**
@@ -373,9 +388,10 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      * 2026-07-18 prod revert). All of that moves to the lazy/deferred
      * {@see ensureConnected()} step which runs on first actual lookup.
      *
-     * NOTE (ANI-S23): every worker that reaches ensureConnected() builds its own
-     * UdpClient, so flood pacing is per process, not per host. See
-     * docs/UDP_SINGLE_OWNER_DESIGN.md.
+     * NOTE (ANI-S23): every worker builds its own UdpClient, but with the
+     * default transport a {@see FileUdpCoordinator} elects ONE socket owner
+     * host-wide and shares the pacing ledger; non-owners never open a socket
+     * and fall back to the title dump. See docs/UDP_SINGLE_OWNER_DESIGN.md.
      *
      * The wire step: construct the title-dump manager seam (no download) and
      * self-register the source with the host MetadataManager.

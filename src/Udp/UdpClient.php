@@ -134,6 +134,16 @@ final class UdpClient
     private WaiterInterface $waiter;
 
     /**
+     * Host-wide single-owner election + pacing ledger (null = standalone).
+     */
+    private ?UdpCoordinatorInterface $coordinator;
+
+    /**
+     * Whether the transport has been opened under the current ownership.
+     */
+    private bool $transportOpen = false;
+
+    /**
      * Valid reply-origin hosts for datagram origin validation.
      *
      * When null it is resolved lazily from {@see API_HOST} (hostname + all its
@@ -190,6 +200,9 @@ final class UdpClient
      *                                                             Defaults to null → @gethostbynamel().
      *                                                             Injectable so TTL tests can count
      *                                                             resolutions without live DNS.
+     * @param UdpCoordinatorInterface|null $coordinator Cross-process single-owner election +
+     *                                                             shared pacing ledger (ANI-S23).
+     *                                                             Null = standalone single-process.
      */
     public function __construct(
         array $settings,
@@ -197,7 +210,9 @@ final class UdpClient
         ?WaiterInterface $waiter = null,
         ?array $validOriginHosts = null,
         ?callable $originHostsResolver = null,
+        ?UdpCoordinatorInterface $coordinator = null,
     ) {
+        $this->coordinator = $coordinator;
         $this->settings = $settings;
         $this->transport = $transport ?? new SocketUdpClient(
             self::API_HOST,
@@ -217,7 +232,38 @@ final class UdpClient
      */
     public function open(): void
     {
-        $this->transport->open();
+        $this->ensureOwnership();
+    }
+
+    /**
+     * Whether this process may talk to AniDB (always true without a coordinator).
+     *
+     * With a coordinator, exactly one process host-wide owns the socket; the
+     * rest never open one and every send returns null (callers fall back to
+     * the offline title dump / cache). Ownership is retried on each call so a
+     * surviving worker takes over when the owner dies.
+     */
+    public function ensureOwnership(): bool
+    {
+        if ($this->coordinator === null) {
+            if (!$this->transportOpen) {
+                $this->transport->open();
+                $this->transportOpen = true;
+            }
+
+            return true;
+        }
+
+        if (!$this->coordinator->tryBecomeOwner()) {
+            return false;
+        }
+
+        if (!$this->transportOpen) {
+            $this->transport->open();
+            $this->transportOpen = true;
+        }
+
+        return true;
     }
 
     /**
@@ -231,6 +277,8 @@ final class UdpClient
             $this->logout();
         }
         $this->transport->close();
+        $this->transportOpen = false;
+        $this->coordinator?->release();
     }
 
     /**
@@ -248,6 +296,11 @@ final class UdpClient
      */
     public function sendCommand(string $command, int $retryCount = 0): ?string
     {
+        // ANI-S23: only the single host-wide owner talks to AniDB.
+        if (!$this->ensureOwnership()) {
+            return null;
+        }
+
         // Lazy AUTH: authenticate on first command if not yet authenticated.
         if ($this->sessionKey === null) {
             $this->authenticate();
@@ -703,6 +756,11 @@ final class UdpClient
         $elapsed = $now - $this->lastSendTimestamp;
 
         $waitTime = self::FLOOD_PROTECTION_INTERVAL_SEC - $elapsed;
+        if ($this->coordinator !== null) {
+            // Joint pacing: the shared ledger spans owner hand-overs, so the
+            // wait is the larger of the local and the host-wide requirement.
+            $waitTime = max($waitTime, $this->coordinator->reserveSendSlot(self::FLOOD_PROTECTION_INTERVAL_SEC));
+        }
         if ($waitTime > 0) {
             $this->waiter->wait($waitTime);
         }

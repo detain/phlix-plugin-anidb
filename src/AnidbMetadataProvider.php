@@ -371,6 +371,10 @@ final class AnidbMetadataProvider implements LifecycleInterface, MetadataSourceI
      * 2026-07-18 prod revert). All of that moves to the lazy/deferred
      * {@see ensureConnected()} step which runs on first actual lookup.
      *
+     * NOTE (ANI-S23): every worker that reaches ensureConnected() builds its own
+     * UdpClient, so flood pacing is per process, not per host. See
+     * docs/UDP_SINGLE_OWNER_DESIGN.md.
+     *
      * The wire step: construct the title-dump manager seam (no download) and
      * self-register the source with the host MetadataManager.
      *

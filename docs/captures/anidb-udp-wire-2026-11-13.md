@@ -33,3 +33,21 @@ standard PKCS#7 padding in both directions (`openssl_encrypt(..., 'aes-128-ecb',
 - Whether a session-bearing `PING s=<key>` extends the session, and whether
   the server drops encryption state at LOGOUT/506 (the client assumes it does
   and renegotiates on every AUTH).
+
+## Addendum: credentialed AUTH attempt (2026-11-13, owner ruling, password supplied)
+
+One further single-threaded run, 3 s spacing, no retries, stopped at the first
+refusal. Packets: 2 (total with the earlier runs: 6 of the 15 allowed).
+
+| Sent (encrypted with the fresh ENCRYPT key unless noted) | Received | Notes |
+|------|------|------|
+| `ENCRYPT user=<USER>&type=1` (plaintext) | `209 <SALT> ENCRYPTION ENABLED` | As before. |
+| `AUTH user=<USER>&pass=<PASSWORD>&protover=3&client=phlix&clientver=1` | `504 CLIENT BANNED` (decrypted; exact text, no tail) | Refused. The client name `phlix` / version `1` is not accepted by AniDB (unregistered or banned). |
+
+Per the capture rules the run stopped there: no session key was ever issued, so
+`PING s=<key>`, `LOGOUT`, the encrypted `200` LOGIN ACCEPTED shape and the
+multi-entry `ANIME` 231 shape were NOT captured and nothing was guessed. This
+confirms the client's existing 504 handling (`AUTH` failure, no session, no
+retry loop). The remaining captures are blocked on the owner registering a
+client name at AniDB (and then setting it in the client's `AUTH` line); until
+then the "Not captured" list above stands.
